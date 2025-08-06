@@ -1,0 +1,188 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* File Manager Design System - Modern, Professional File Management Interface 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 220 13% 18%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 13% 18%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 13% 18%;
+
+    /* File Manager Primary - Olive Green */
+    --primary: 82 49% 47%; /* A balanced olive green */
+    --primary-foreground: 0 0% 100%; /* White text for contrast */
+    --primary-hover: 82 49% 40%; /* Slightly darker olive for hover */
+    --primary-light: 82 49% 90%; /* Lighter olive for subtle accents */
+
+    /* File Manager Secondary - Clean Gray */
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 13% 18%;
+    --secondary-hover: 220 14% 91%;
+
+    /* File Manager Surface Colors */
+    --surface: 0 0% 100%;
+    --surface-hover: 220 14% 98%;
+    --surface-selected: 82 49% 90%; /* Changed to olive-green-light */
+    --surface-border: 220 13% 91%;
+
+    /* File Manager Neutral Tones */
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+
+    --accent: 82 49% 90%; /* Changed to olive-green-light */
+    --accent-foreground: 82 49% 25%; /* Darker olive for contrast */
+
+    /* File Manager Status Colors */
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* File Manager Layout */
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 82 49% 47%; /* Changed to olive-green */
+    --sidebar-width: 280px;
+    --header-height: 64px;
+
+    --radius: 8px;
+
+    --sidebar-background: 220 13% 18%; /* Darker background for contrast */
+
+    --sidebar-foreground: 0 0% 98%;
+
+    --sidebar-primary: 82 49% 47%; /* Changed to olive-green */
+
+    --sidebar-primary-foreground: 0 0% 100%;
+
+    --sidebar-accent: 82 49% 90%; /* Changed to olive-green-light */
+
+    --sidebar-accent-foreground: 82 49% 25%; /* Darker olive for contrast */
+
+    --sidebar-border: 220 13% 25%; /* Darker border for contrast */
+
+    --sidebar-ring: 82 49% 47%; /* Changed to olive-green */
+  }
+
+  .dark {
+    --background: 220 13% 9%;
+    --foreground: 220 14% 96%;
+
+    --card: 220 13% 11%;
+    --card-foreground: 220 14% 96%;
+
+    --popover: 220 13% 11%;
+    --popover-foreground: 220 14% 96%;
+
+    /* Dark Mode File Manager Primary - Olive Green */
+    --primary: 82 49% 52%; /* Slightly lighter olive for dark mode */
+    --primary-foreground: 220 13% 9%;
+    --primary-hover: 82 49% 57%;
+    --primary-light: 82 49% 20%;
+
+    /* Dark Mode File Manager Secondary */
+    --secondary: 220 13% 15%;
+    --secondary-foreground: 220 14% 96%;
+    --secondary-hover: 220 13% 18%;
+
+    /* Dark Mode File Manager Surface Colors */
+    --surface: 220 13% 11%;
+    --surface-hover: 220 13% 15%;
+    --surface-selected: 82 49% 20%; /* Changed to olive-green-light */
+    --surface-border: 220 13% 20%;
+
+    /* Dark Mode File Manager Neutral Tones */
+    --muted: 220 13% 15%;
+    --muted-foreground: 220 9% 70%;
+
+    --accent: 82 49% 20%; /* Changed to olive-green-light */
+    --accent-foreground: 82 49% 70%; /* Lighter olive for contrast */
+
+    /* Dark Mode File Manager Status Colors */
+    --success: 142 76% 45%;
+    --success-foreground: 220 13% 9%;
+    --warning: 38 92% 55%;
+    --warning-foreground: 220 13% 9%;
+    --destructive: 0 84% 65%;
+    --destructive-foreground: 220 13% 9%;
+
+    /* Dark Mode File Manager Layout */
+    --border: 220 13% 20%;
+    --input: 220 13% 20%;
+    --ring: 82 49% 52%; /* Changed to olive-green */
+    --sidebar-background: 220 13% 18%; /* Darker background for contrast */
+    --sidebar-foreground: 220 14% 96%;
+    --sidebar-primary: 82 49% 52%; /* Changed to olive-green */
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 82 49% 20%; /* Changed to olive-green-light */
+    --sidebar-accent-foreground: 82 49% 70%; /* Lighter olive for contrast */
+    --sidebar-border: 220 13% 25%; /* Darker border for contrast */
+    --sidebar-ring: 82 49% 52%; /* Changed to olive-green */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+      "Roboto", sans-serif;
+  }
+
+  /* File Manager Custom Scrollbars */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 3px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+
+  /* File Manager Animations */
+  .file-item-enter {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  .file-item-enter-active {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 200ms ease-out, transform 200ms ease-out;
+  }
+
+  .folder-expand {
+    transition: all 0.2s ease-out;
+  }
+
+  .upload-progress {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--primary)) 0%,
+      hsl(var(--primary-hover)) 100%
+    );
+  }
+}
