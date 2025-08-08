@@ -4,10 +4,79 @@ import { isPreviewable, formatDate, getFileExtension } from "@/utils/fileUtils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { FileIcon } from "@/components/shared/FileIcon";
+import { fileApi } from "@/services/api";
+import { toast } from "@/hooks/use-toast";
+import { useState, useEffect } from "react";
 
 export function DocumentViewer() {
   const { state } = useFileManager();
   const { selectedFile } = state;
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [textPreviewContent, setTextPreviewContent] = useState<string | null>(
+    null
+  ); // New state for text content
+
+  useEffect(() => {
+    const fetchPreview = async () => {
+      if (!selectedFile || !isPreviewable(selectedFile)) {
+        setPreviewUrl(null);
+        setTextPreviewContent(null); // Clear text content
+        return;
+      }
+
+      setLoadingPreview(true);
+      try {
+        let url: string | null = null;
+        if (
+          selectedFile.mimeType?.includes("text") ||
+          ["txt", "md", "json", "xml", "csv"].includes(
+            getFileExtension(selectedFile.name)
+          )
+        ) {
+          // For text files, fetch as text and create a data URL
+          const response = await fileApi.getFile(selectedFile.id);
+          const textContent = response.data; // Assuming response.data is directly the text content
+          setTextPreviewContent(textContent); // Set the text content state
+          url = URL.createObjectURL(
+            new Blob([textContent], {
+              type: selectedFile.mimeType || "text/plain",
+            })
+          );
+        } else {
+          setTextPreviewContent(null); // Clear text content for non-text files
+          const response = await fileApi.previewFile(selectedFile.id);
+          const fileBlob = new Blob([response.data], {
+            type: response.headers["content-type"],
+          });
+          url = URL.createObjectURL(fileBlob);
+        }
+        setPreviewUrl(url);
+      } catch (error) {
+        console.error("Error fetching preview:", error);
+        toast({
+          title: "Preview failed",
+          description: "Could not load file preview.",
+          variant: "destructive",
+        });
+        setPreviewUrl(null);
+        setTextPreviewContent(null); // Clear text content on error
+      } finally {
+        setLoadingPreview(false);
+      }
+    };
+
+    fetchPreview();
+
+    // Cleanup URL when component unmounts or selectedFile changes
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        setPreviewUrl(null);
+      }
+      setTextPreviewContent(null); // Also clear text content on cleanup
+    };
+  }, [selectedFile]);
 
   if (!selectedFile) {
     return (
@@ -29,7 +98,17 @@ export function DocumentViewer() {
   const canPreview = isPreviewable(selectedFile);
 
   const renderPreview = () => {
-    if (!canPreview) {
+    if (loadingPreview) {
+      return (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-muted-foreground">Loading preview...</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (!canPreview || !previewUrl) {
       return (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
@@ -50,12 +129,12 @@ export function DocumentViewer() {
       return (
         <div className="flex-1 flex items-center justify-center p-4">
           <img
-            src={selectedFile.url || "/placeholder-image.png"}
+            src={previewUrl}
             alt={selectedFile.name}
             className="max-w-full max-h-full object-contain rounded-lg shadow-md"
             onError={(e) => {
               const target = e.target as HTMLImageElement;
-              target.src = "/placeholder-image.png";
+              target.src = "/placeholder-image.png"; // Fallback image
             }}
           />
         </div>
@@ -67,7 +146,7 @@ export function DocumentViewer() {
       return (
         <div className="flex-1">
           <iframe
-            src={selectedFile.url || "/placeholder.pdf"}
+            src={previewUrl}
             className="w-full h-full border-0 rounded-lg"
             title={selectedFile.name}
           />
@@ -87,7 +166,7 @@ export function DocumentViewer() {
             className="max-w-full max-h-full rounded-lg shadow-md"
             preload="metadata"
           >
-            <source src={selectedFile.url} type={selectedFile.mimeType} />
+            <source src={previewUrl} type={selectedFile.mimeType} />
             Your browser does not support the video tag.
           </video>
         </div>
@@ -102,8 +181,9 @@ export function DocumentViewer() {
       return (
         <div className="flex-1 p-4 overflow-auto">
           <pre className="text-sm text-foreground whitespace-pre-wrap">
-            {/* In a real app, you would fetch and display the file content */}
-            Loading file content...
+            {loadingPreview
+              ? "Loading text preview..."
+              : textPreviewContent || "No content to display."}
           </pre>
         </div>
       );

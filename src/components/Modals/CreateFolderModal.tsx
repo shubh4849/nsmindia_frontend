@@ -10,22 +10,33 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFileManager } from "@/context/FileManagerContext";
-import { validateFileName, generateId, buildFilePath } from "@/utils/fileUtils";
+import { validateFileName } from "@/utils/fileUtils"; // Removed generateId and buildFilePath
 import { toast } from "@/hooks/use-toast";
+import { folderApi } from "@/services/api"; // Import folderApi
 
 interface CreateFolderModalProps {
   isOpen: boolean;
   onClose: () => void;
+  parentFolderId: string | null; // New prop for the parent folder's ID
+  parentFolderCurrentPath: string[]; // New prop for the parent folder's current path
 }
 
-export function CreateFolderModal({ isOpen, onClose }: CreateFolderModalProps) {
+export function CreateFolderModal({
+  isOpen,
+  onClose,
+  parentFolderId,
+  parentFolderCurrentPath, // Destructure the new prop
+}: CreateFolderModalProps) {
   const [folderName, setFolderName] = useState("");
   const [description, setDescription] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-  const { state, dispatch } = useFileManager();
+  const { state, dispatch, fetchFiles, fetchFolderTree } = useFileManager(); // Add fetchFiles and fetchFolderTree
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    console.log("CreateFolderModal - parentFolderId:", parentFolderId);
+    console.log("CreateFolderModal - parentFolderCurrentPath:", parentFolderCurrentPath);
 
     const validationError = validateFileName(folderName);
     if (validationError) {
@@ -40,31 +51,37 @@ export function CreateFolderModal({ isOpen, onClose }: CreateFolderModalProps) {
     setIsCreating(true);
 
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      const newFolder = {
-        id: generateId(),
-        name: folderName,
-        type: "folder" as const,
-        createdAt: new Date().toISOString(),
-        modifiedAt: new Date().toISOString(),
-        path: buildFilePath(state.currentPath),
-        description: description.trim() || `Folder: ${folderName}`,
-      };
-
-      dispatch({ type: "ADD_FOLDER", payload: newFolder });
+      // Call the backend API to create a folder
+      console.log("Calling folderApi.createFolder with:", {
+        folderName,
+        description: description.trim(),
+        path: [...parentFolderCurrentPath, folderName].filter(Boolean),
+        parentId: parentFolderId ?? undefined
+      });
+      
+      await folderApi.createFolder(
+        folderName,
+        description.trim(),
+        // Pass the new folder's path as an array; the API will join it and add the trailing slash
+        [...parentFolderCurrentPath, folderName].filter(Boolean),
+        parentFolderId ?? undefined // Use the parentFolderId from props
+      );
 
       toast({
         title: "Folder created",
         description: `"${folderName}" has been created successfully.`,
       });
 
+      // Re-fetch files and folder tree to update the UI
+      fetchFiles();
+      fetchFolderTree(); // Re-fetch folder tree
+
       // Reset form and close modal
       setFolderName("");
       setDescription("");
       onClose();
     } catch (error) {
+      console.error("Error creating folder:", error);
       toast({
         title: "Error creating folder",
         description: "Something went wrong. Please try again.",

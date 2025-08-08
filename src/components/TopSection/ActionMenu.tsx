@@ -9,7 +9,9 @@ import {
 import { useFileManager } from "@/context/FileManagerContext";
 
 export function ActionMenu() {
-  const { openCreateFolderModal, openUploadFileModal } = useFileManager();
+  const { state, openCreateFolderModal, openUploadFileModal } =
+    useFileManager();
+  const { currentFolderId } = state;
 
   return (
     <>
@@ -25,7 +27,7 @@ export function ActionMenu() {
           className="w-48 bg-surface border-border shadow-lg"
         >
           <DropdownMenuItem
-            onClick={openCreateFolderModal}
+            onClick={() => openCreateFolderModal(currentFolderId)}
             className="cursor-pointer hover:bg-surface-hover"
           >
             <FolderPlus size={16} className="mr-2 text-primary" />

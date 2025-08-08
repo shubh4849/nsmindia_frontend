@@ -10,13 +10,16 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useFileManager } from "@/context/FileManagerContext";
-import { generateId, formatFileSize } from "@/utils/fileUtils";
+import { formatFileSize } from "@/utils/fileUtils";
 import { ProgressBar } from "@/components/shared/ProgressBar";
 import { toast } from "@/hooks/use-toast";
+import { fileApi } from "@/services/api";
 
 interface UploadFileModalProps {
   isOpen: boolean;
   onClose: () => void;
+  parentFolderId: string | null; // New prop
+  parentFolderCurrentPath: string[]; // New prop
 }
 
 interface PendingFile {
@@ -26,15 +29,28 @@ interface PendingFile {
   progress: number;
 }
 
-export function UploadFileModal({ isOpen, onClose }: UploadFileModalProps) {
+export function UploadFileModal({
+  isOpen,
+  onClose,
+  parentFolderId,
+  parentFolderCurrentPath,
+}: UploadFileModalProps) {
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const { addUpload, updateUpload, dispatch } = useFileManager();
+  const {
+    addUpload,
+    updateUpload,
+    dispatch,
+    state,
+    fetchFiles,
+    fetchFolderTree,
+  } = useFileManager();
+  const { currentPath } = state;
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const newFiles = acceptedFiles.map((file) => ({
       file,
-      id: generateId(),
+      id: `${file.name}-${file.size}-${Date.now()}`,
       status: "pending" as const,
       progress: 0,
     }));
@@ -52,15 +68,16 @@ export function UploadFileModal({ isOpen, onClose }: UploadFileModalProps) {
     setPendingFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
-  const simulateUpload = async (pendingFile: PendingFile) => {
+  const uploadFile = async (pendingFile: PendingFile) => {
     const { file, id } = pendingFile;
 
-    // Update status to uploading
     setPendingFiles((prev) =>
       prev.map((f) => (f.id === id ? { ...f, status: "uploading" } : f))
     );
 
-    // Add to upload progress tracker
+    // Before calling API, prepare to add upload to context for tracking
+    // Note: The `id` passed to `addUpload` should ideally be the `uploadId` returned from the backend.
+    // For now, we use the client-generated ID and will update it once the backend response is received.
     addUpload({
       id,
       fileName: file.name,
@@ -69,47 +86,44 @@ export function UploadFileModal({ isOpen, onClose }: UploadFileModalProps) {
     });
 
     try {
-      // Simulate upload progress
-      for (let progress = 0; progress <= 100; progress += 10) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-
-        setPendingFiles((prev) =>
-          prev.map((f) => (f.id === id ? { ...f, progress } : f))
-        );
-
-        updateUpload(
-          id,
-          progress,
-          progress === 100 ? "completed" : "uploading"
-        );
-      }
-
-      // Mark as completed
-      setPendingFiles((prev) =>
-        prev.map((f) => (f.id === id ? { ...f, status: "completed" } : f))
+      const response = await fileApi.uploadFile(
+        file,
+        parentFolderCurrentPath, // Use parentFolderCurrentPath
+        parentFolderId || undefined, // Pass parentFolderId
+        ((progressEvent: any) => {
+          const percentCompleted = Math.round(
+            (progressEvent.loaded * 100) / (progressEvent.total || 1)
+          );
+          setPendingFiles((prev) =>
+            prev.map((f) =>
+              f.id === id ? { ...f, progress: percentCompleted } : f
+            )
+          );
+          updateUpload(id, percentCompleted, "uploading");
+        }) as any // Explicitly cast to any to satisfy linter for now
       );
 
-      // Add to file system (mock)
-      const newFile = {
-        id: generateId(),
-        name: file.name,
-        type: "file" as const,
-        size: formatFileSize(file.size),
-        createdAt: new Date().toISOString(),
-        modifiedAt: new Date().toISOString(),
-        path: "",
-        mimeType: file.type,
-        description: `Uploaded file: ${file.name}`,
-      };
+      // Update the pending file with the actual uploadId from the backend response
+      const { uploadId } = response.data; // Assuming backend returns { uploadId: string, fileId: string }
+      setPendingFiles((prev) =>
+        prev.map((f) =>
+          f.id === id
+            ? { ...f, id: uploadId, status: "completed", progress: 100 }
+            : f
+        )
+      );
+      updateUpload(uploadId, 100, "completed");
 
-      dispatch({ type: "ADD_FILE", payload: newFile });
+      toast({
+        title: "Upload successful",
+        description: `"${file.name}" has been uploaded successfully.`,
+      });
     } catch (error) {
+      console.error("Error uploading file:", error);
       setPendingFiles((prev) =>
         prev.map((f) => (f.id === id ? { ...f, status: "error" } : f))
       );
-
       updateUpload(id, 0, "error");
-
       toast({
         title: "Upload failed",
         description: `Failed to upload ${file.name}`,
@@ -122,26 +136,19 @@ export function UploadFileModal({ isOpen, onClose }: UploadFileModalProps) {
     if (pendingFiles.length === 0) return;
 
     setIsUploading(true);
+    const filesToUpload = pendingFiles.filter((f) => f.status === "pending");
 
     try {
-      // Upload files sequentially for demo purposes
-      // In a real app, you might want to upload them in parallel
-      for (const pendingFile of pendingFiles) {
-        if (pendingFile.status === "pending") {
-          await simulateUpload(pendingFile);
-        }
-      }
+      await Promise.all(filesToUpload.map(uploadFile));
 
       toast({
-        title: "Upload completed",
-        description: `Successfully uploaded ${pendingFiles.length} file(s)`,
+        title: "All uploads completed",
+        description: `Successfully uploaded ${filesToUpload.length} file(s)`,
       });
-
-      // Clear completed files after a delay
-      setTimeout(() => {
-        setPendingFiles([]);
-        onClose();
-      }, 1000);
+      fetchFiles(); // Re-fetch files after upload
+      fetchFolderTree(); // Re-fetch folder tree after upload
+      setPendingFiles([]);
+      onClose();
     } finally {
       setIsUploading(false);
     }

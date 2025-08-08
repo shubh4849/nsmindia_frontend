@@ -3,13 +3,12 @@ import { Button } from "@/components/ui/button";
 import { useFileManager } from "@/context/FileManagerContext";
 
 export function Pagination() {
-  const { state, dispatch, getFilteredFiles } = useFileManager();
-  const { currentPage, itemsPerPage } = state;
+  const { state, dispatch } = useFileManager();
+  const { currentPage, itemsPerPage, totalFiles } = state;
 
-  const files = getFilteredFiles();
-  const totalPages = Math.ceil(files.length / itemsPerPage);
+  const totalPages = Math.ceil(totalFiles / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = Math.min(startIndex + itemsPerPage, files.length);
+  const endIndex = Math.min(startIndex + itemsPerPage, totalFiles);
 
   if (totalPages <= 1) {
     return null;
@@ -66,7 +65,7 @@ export function Pagination() {
     <div className="border-t border-border bg-surface px-6 py-3">
       <div className="flex items-center justify-between">
         <div className="text-sm text-muted-foreground">
-          Showing {startIndex + 1}-{endIndex} of {files.length} items
+          Showing {startIndex + 1}-{endIndex} of {totalFiles} items
         </div>
 
         <div className="flex items-center space-x-1">
