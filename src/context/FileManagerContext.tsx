@@ -65,6 +65,10 @@ interface FileManagerState {
   folderToCreateInId: string | null; // New: ID of the folder to create new item in
   folderToCreateParentPath: string[]; // New: Path of the folder where new item is being created
   rootFoldersWithCounts: FolderItemWithCounts[]; // New: For displaying root folders with counts in the main grid
+  // Main table inline expansion state
+  mainExpandedIds: Set<string>;
+  mainChildrenByParent: Record<string, FileItem[]>;
+  selectedMainFolderId: string | null;
 }
 
 type FileManagerAction =
@@ -125,7 +129,18 @@ type FileManagerAction =
         dateTo: Date | undefined;
       };
     }
-  | { type: "SET_ROOT_FOLDERS"; payload: FolderItemWithCounts[] };
+  | { type: "SET_ROOT_FOLDERS"; payload: FolderItemWithCounts[] }
+  | {
+      type: "SET_FOLDER_CHILDREN";
+      payload: { parentId: string; children: FileItem[] };
+    }
+  | { type: "TOGGLE_MAIN_EXPAND"; payload: string }
+  | {
+      type: "SET_MAIN_CHILDREN";
+      payload: { parentId: string; children: FileItem[] };
+    }
+  | { type: "SET_SELECTED_MAIN_FOLDER"; payload: string | null }
+  | { type: "CLEAR_MAIN_EXPANSIONS" };
 
 const initialState: FileManagerState = {
   currentPath: ["Root"],
@@ -155,6 +170,9 @@ const initialState: FileManagerState = {
   folderToCreateInId: null, // Initialize to null
   folderToCreateParentPath: ["Root"], // Initialize with Root path
   rootFoldersWithCounts: [], // Initialize root folders with counts array
+  mainExpandedIds: new Set<string>(),
+  mainChildrenByParent: {},
+  selectedMainFolderId: null,
 };
 
 function fileManagerReducer(
@@ -266,6 +284,38 @@ function fileManagerReducer(
       };
     case "SET_ROOT_FOLDERS":
       return { ...state, rootFoldersWithCounts: action.payload };
+    case "SET_FOLDER_CHILDREN": {
+      const updateChildren = (nodes: FileItem[]): FileItem[] =>
+        nodes.map((n) => {
+          if (n.id === action.payload.parentId) {
+            return { ...n, children: action.payload.children };
+          }
+          if (n.children && n.children.length > 0) {
+            return { ...n, children: updateChildren(n.children) };
+          }
+          return n;
+        });
+      return { ...state, folderTree: updateChildren(state.folderTree) };
+    }
+    case "TOGGLE_MAIN_EXPAND": {
+      const newSet = new Set(state.mainExpandedIds);
+      if (newSet.has(action.payload)) newSet.delete(action.payload);
+      else newSet.add(action.payload);
+      return { ...state, mainExpandedIds: newSet };
+    }
+    case "SET_MAIN_CHILDREN": {
+      const next = { ...state.mainChildrenByParent };
+      next[action.payload.parentId] = action.payload.children;
+      return { ...state, mainChildrenByParent: next };
+    }
+    case "SET_SELECTED_MAIN_FOLDER":
+      return { ...state, selectedMainFolderId: action.payload };
+    case "CLEAR_MAIN_EXPANSIONS":
+      return {
+        ...state,
+        selectedMainFolderId: null,
+        mainExpandedIds: new Set<string>(),
+      };
     default:
       return state;
   }
@@ -290,6 +340,10 @@ interface FileManagerContextType {
   openUploadFileModal: (parentId: string | null) => void; // Update signature to accept parentId
   closeUploadFileModal: () => void;
   fetchFolderTree: () => Promise<void>;
+  fetchFolderChildren: (parentId: string) => Promise<void>;
+  fetchMainChildren: (parentId: string) => Promise<void>;
+  toggleMainExpand: (folderId: string) => void;
+  selectMainFolder: (folderId: string | null) => void;
   fetchRootFolders: () => Promise<void>; // New function for fetching root folders
   applyFilters: (filters: {
     name: string;
@@ -298,6 +352,8 @@ interface FileManagerContextType {
     dateTo: Date | undefined;
   }) => void;
   clearFilters: () => void;
+  setBreadcrumbPath: (segments: string[]) => void;
+  clearMainExploration: () => void;
 }
 
 const FileManagerContext = createContext<FileManagerContextType | undefined>(
@@ -390,10 +446,9 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
       );
       if (rootFolder) {
         dispatch({ type: "SET_ROOT_FOLDER_ID", payload: rootFolder.id });
-        // Only set current folder to root if it's currently null (initial load)
+        // Do not set currentFolderId here; homepage should remain root list until user navigates
         if (state.currentFolderId === null) {
-          dispatch({ type: "SET_CURRENT_FOLDER_ID", payload: rootFolder.id });
-          dispatch({ type: "SET_CURRENT_PATH", payload: [rootFolder.name] });
+          dispatch({ type: "SET_CURRENT_PATH", payload: ["Root"] });
         }
       } else {
         // If no root folder, ensure current folder is null
@@ -446,28 +501,25 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
             parentId: null,
             page: state.currentPage,
             limit: state.itemsPerPage,
+            includeChildCounts: true,
           });
 
-          const foldersWithCounts: FolderItemWithCounts[] = await Promise.all(
-            rootFoldersResponse.data.results.map(async (folder: FileItem) => {
-              const [childFoldersCountResponse, childFilesCountResponse] =
-                await Promise.all([
-                  folderApi.getDirectChildFoldersCount(folder.id),
-                  folderApi.getDirectChildFilesCount(folder.id),
-                ]);
-              return {
-                ...folder,
-                totalChildFolders: childFoldersCountResponse.data.count,
-                totalChildFiles: childFilesCountResponse.data.count,
-              };
-            })
-          );
+          const foldersWithCounts: FolderItemWithCounts[] = (
+            rootFoldersResponse.data.results || []
+          ).map((folder: any) => ({
+            ...folder,
+            type: "folder",
+            totalChildFolders: folder.counts?.childFolders ?? 0,
+            totalChildFiles: folder.counts?.childFiles ?? 0,
+          }));
 
           dispatch({
             type: "SET_FILES_AND_TOTAL",
             payload: {
               files: foldersWithCounts,
-              total: foldersWithCounts.length,
+              total:
+                rootFoldersResponse.data.totalResults ||
+                foldersWithCounts.length,
             },
           });
           dispatch({ type: "SET_ROOT_FOLDERS", payload: foldersWithCounts });
@@ -482,10 +534,19 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
             { page: state.currentPage, limit: state.itemsPerPage }
           );
 
-          const combinedContentsForFolder = [
-            ...(folderContentsResponse.data.folders || []),
-            ...(folderContentsResponse.data.files || []),
-          ];
+          const mappedFolders: FileItem[] = (
+            folderContentsResponse.data.folders || []
+          ).map((f: any) => ({
+            ...f,
+            type: "folder",
+          }));
+          const mappedFiles: FileItem[] = (
+            folderContentsResponse.data.files || []
+          ).map((f: any) => ({
+            ...f,
+            type: "file",
+          }));
+          const combinedContentsForFolder = [...mappedFolders, ...mappedFiles];
           const totalCombinedForFolder =
             (folderContentsResponse.data.pagination?.totalFolders || 0) +
             (folderContentsResponse.data.pagination?.totalFiles || 0);
@@ -521,6 +582,7 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
   }, [
     state.currentFolderId,
     state.currentPage,
+    state.itemsPerPage,
     state.searchQuery,
     state.sortBy,
     state.sortOrder,
@@ -579,10 +641,26 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
           (f) => f.id === targetParentId
         );
         console.log("Found parentFolder:", parentFolder);
-        if (parentFolder && parentFolder.path) {
-          // Split and filter for consistency, then append parentFolder.name
-          parentPath = parentFolder.path.split("/").filter(Boolean);
-        } else if (targetParentId === state.rootFolderId) {
+        const findPath = (
+          nodes: FileItem[],
+          id: string | null,
+          currentPathSegments: string[]
+        ): string[] | null => {
+          for (const node of nodes) {
+            const newPathSegments = [...currentPathSegments, node.name];
+            if (node.id === id) {
+              return newPathSegments;
+            }
+            if (node.children) {
+              const childPath = findPath(node.children, id, newPathSegments);
+              if (childPath) return childPath;
+            }
+          }
+          return null;
+        };
+        const resolved = findPath(state.folderTree, targetParentId, []);
+        if (resolved) parentPath = resolved;
+        if (targetParentId === state.rootFolderId) {
           parentPath = ["Root"];
         }
       }
@@ -705,6 +783,84 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const fetchFolderChildren = useCallback(async (parentId: string) => {
+    try {
+      const res = await folderApi.getFolderContents(parentId, {
+        page: 1,
+        limit: 200,
+      });
+      const childFolders: FileItem[] = (res.data.folders || []).map(
+        (f: any) => ({
+          ...f,
+          type: "folder",
+        })
+      );
+      const childFiles: FileItem[] = (res.data.files || []).map((f: any) => ({
+        ...f,
+        id: f.id || f._id,
+        type: "file",
+      }));
+      const combinedChildren: FileItem[] = [...childFolders, ...childFiles];
+      dispatch({
+        type: "SET_FOLDER_CHILDREN",
+        payload: { parentId, children: combinedChildren },
+      });
+    } catch (e) {
+      console.error("Failed to fetch folder children for tree:", parentId, e);
+      dispatch({
+        type: "SET_FOLDER_CHILDREN",
+        payload: { parentId, children: [] },
+      });
+    }
+  }, []);
+
+  const fetchMainChildren = useCallback(async (parentId: string) => {
+    try {
+      // Use contents endpoint as requested
+      const res = await folderApi.getFolderContents(parentId, {
+        page: 1,
+        limit: 200,
+      });
+      const foldersRaw = res.data.folders || [];
+      // Enrich folders with direct child counts
+      const foldersWithCounts: FileItem[] = await Promise.all(
+        foldersRaw.map(async (f: any) => {
+          try {
+            const [cf, cfi] = await Promise.all([
+              folderApi.getDirectChildFoldersCount(f.id || f._id),
+              folderApi.getDirectChildFilesCount(f.id || f._id),
+            ]);
+            return {
+              ...f,
+              id: f.id || f._id,
+              type: "folder",
+              totalChildFolders: cf.data.count ?? 0,
+              totalChildFiles: cfi.data.count ?? 0,
+            } as FileItem;
+          } catch {
+            return { ...f, id: f.id || f._id, type: "folder" } as FileItem;
+          }
+        })
+      );
+      const childFiles: FileItem[] = (res.data.files || []).map((f: any) => ({
+        ...f,
+        id: f.id || f._id,
+        type: "file",
+      }));
+      const combined = [...foldersWithCounts, ...childFiles];
+      dispatch({
+        type: "SET_MAIN_CHILDREN",
+        payload: { parentId, children: combined },
+      });
+    } catch (e) {
+      console.error("Failed to fetch main children for", parentId, e);
+      dispatch({
+        type: "SET_MAIN_CHILDREN",
+        payload: { parentId, children: [] },
+      });
+    }
+  }, []);
+
   const fetchRootFolders = useCallback(async () => {
     dispatch({ type: "SET_LOADING", payload: true });
     try {
@@ -813,6 +969,8 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
         state,
         dispatch,
         navigateToPath,
+        setBreadcrumbPath: (segments: string[]) =>
+          dispatch({ type: "SET_CURRENT_PATH", payload: segments }),
         selectFile,
         addUpload,
         updateUpload,
@@ -824,9 +982,16 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
         openUploadFileModal,
         closeUploadFileModal,
         fetchFolderTree,
+        fetchFolderChildren,
+        fetchMainChildren,
+        toggleMainExpand: (id: string) =>
+          dispatch({ type: "TOGGLE_MAIN_EXPAND", payload: id }),
+        selectMainFolder: (id: string | null) =>
+          dispatch({ type: "SET_SELECTED_MAIN_FOLDER", payload: id }),
         fetchRootFolders,
         applyFilters,
         clearFilters,
+        clearMainExploration: () => dispatch({ type: "CLEAR_MAIN_EXPANSIONS" }),
       }}
     >
       {children}

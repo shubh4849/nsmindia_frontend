@@ -68,28 +68,49 @@ export function Pagination() {
           Showing {startIndex + 1}-{endIndex} of {totalFiles} items
         </div>
 
-        <div className="flex items-center space-x-1">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handlePrevious}
-            disabled={currentPage === 1}
-            className="h-8 w-8 p-0 bg-surface hover:bg-surface-hover border-border disabled:opacity-50"
-          >
-            <ChevronLeft size={16} />
-          </Button>
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-muted-foreground">Rows per page</span>
+            <select
+              value={itemsPerPage}
+              onChange={(e) =>
+                dispatch({
+                  type: "SET_ITEMS_PER_PAGE",
+                  payload: Number(e.target.value),
+                })
+              }
+              className="h-8 px-2 bg-surface border border-border rounded text-sm"
+            >
+              {[5, 10, 15, 20].map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center space-x-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePrevious}
+              disabled={currentPage === 1}
+              className="h-8 w-8 p-0 bg-surface hover:bg-surface-hover border-border disabled:opacity-50"
+            >
+              <ChevronLeft size={16} />
+            </Button>
 
-          {renderPageNumbers()}
+            {renderPageNumbers()}
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleNext}
-            disabled={currentPage === totalPages}
-            className="h-8 w-8 p-0 bg-surface hover:bg-surface-hover border-border disabled:opacity-50"
-          >
-            <ChevronRight size={16} />
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleNext}
+              disabled={currentPage === totalPages}
+              className="h-8 w-8 p-0 bg-surface hover:bg-surface-hover border-border disabled:opacity-50"
+            >
+              <ChevronRight size={16} />
+            </Button>
+          </div>
         </div>
       </div>
     </div>

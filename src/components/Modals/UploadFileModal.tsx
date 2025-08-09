@@ -29,6 +29,35 @@ interface PendingFile {
   progress: number;
 }
 
+// Allowed MIME types
+const IMAGE_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/bmp",
+  "image/webp",
+  "image/tiff",
+];
+const DOCUMENT_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+  "text/csv",
+];
+const ACCEPTED_TYPES = [...IMAGE_TYPES, ...DOCUMENT_TYPES];
+const ACCEPT_MAP: Record<string, string[]> = ACCEPTED_TYPES.reduce(
+  (acc, type) => {
+    acc[type] = [];
+    return acc;
+  },
+  {} as Record<string, string[]>
+);
+
 export function UploadFileModal({
   isOpen,
   onClose,
@@ -48,7 +77,21 @@ export function UploadFileModal({
   const { currentPath } = state;
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
-    const newFiles = acceptedFiles.map((file) => ({
+    const whitelist = new Set(ACCEPTED_TYPES);
+    const filtered = acceptedFiles.filter((f) => whitelist.has(f.type));
+    const rejected = acceptedFiles.filter((f) => !whitelist.has(f.type));
+
+    if (rejected.length > 0) {
+      toast({
+        title: "Some files were rejected",
+        description: `Unsupported file types: ${rejected
+          .map((r) => r.name)
+          .join(", ")}`,
+        variant: "destructive",
+      });
+    }
+
+    const newFiles = filtered.map((file) => ({
       file,
       id: `${file.name}-${file.size}-${Date.now()}`,
       status: "pending" as const,
@@ -58,11 +101,26 @@ export function UploadFileModal({
     setPendingFiles((prev) => [...prev, ...newFiles]);
   }, []);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    multiple: true,
-    maxSize: 100 * 1024 * 1024, // 100MB max file size
-  });
+  const onDropRejected = useCallback((fileRejections: any[]) => {
+    if (!fileRejections || fileRejections.length === 0) return;
+    const names = fileRejections.map((r) => r.file?.name).filter(Boolean);
+    toast({
+      title: "Some files were rejected",
+      description: names.length
+        ? `Unsupported file types: ${names.join(", ")}`
+        : "Unsupported file types selected.",
+      variant: "destructive",
+    });
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive, isDragReject } =
+    useDropzone({
+      onDrop,
+      onDropRejected,
+      multiple: true,
+      maxSize: 100 * 1024 * 1024, // 100MB max file size
+      accept: ACCEPT_MAP,
+    });
 
   const removeFile = (id: string) => {
     setPendingFiles((prev) => prev.filter((f) => f.id !== id));
@@ -103,30 +161,32 @@ export function UploadFileModal({
         }) as any // Explicitly cast to any to satisfy linter for now
       );
 
-      // Update the pending file with the actual uploadId from the backend response
-      const { uploadId } = response.data; // Assuming backend returns { uploadId: string, fileId: string }
+      // Update the pending file with completion on the same local id
+      const { uploadId } = response.data; // available if needed later
       setPendingFiles((prev) =>
         prev.map((f) =>
-          f.id === id
-            ? { ...f, id: uploadId, status: "completed", progress: 100 }
-            : f
+          f.id === id ? { ...f, status: "completed", progress: 100 } : f
         )
       );
-      updateUpload(uploadId, 100, "completed");
+      updateUpload(id, 100, "completed");
 
       toast({
         title: "Upload successful",
         description: `"${file.name}" has been uploaded successfully.`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error uploading file:", error);
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        `Failed to upload ${file.name}`;
       setPendingFiles((prev) =>
         prev.map((f) => (f.id === id ? { ...f, status: "error" } : f))
       );
       updateUpload(id, 0, "error");
       toast({
         title: "Upload failed",
-        description: `Failed to upload ${file.name}`,
+        description: message,
         variant: "destructive",
       });
     }
@@ -190,6 +250,11 @@ export function UploadFileModal({
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               Maximum file size: 100MB
+              {isDragReject && (
+                <span className="ml-2 text-destructive">
+                  (Unsupported type)
+                </span>
+              )}
             </p>
           </div>
 

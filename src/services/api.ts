@@ -10,14 +10,15 @@ if (!API_BASE_URL) {
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    "Content-Type": "application/json",
-  },
 });
 
 // Helper function to recursively transform keys
 const transformKeys = (obj: any, fromKey: string, toKey: string): any => {
   if (typeof obj !== "object" || obj === null) {
+    return obj;
+  }
+  // Do not transform FormData; it must be sent as-is
+  if (typeof FormData !== "undefined" && obj instanceof FormData) {
     return obj;
   }
   if (Array.isArray(obj)) {
@@ -35,6 +36,17 @@ const transformKeys = (obj: any, fromKey: string, toKey: string): any => {
 
 // Request interceptor to transform 'id' to '_id' for outgoing data
 api.interceptors.request.use((config) => {
+  // If sending FormData, let the browser set Content-Type with boundary and skip transforms
+  if (
+    config.data &&
+    typeof FormData !== "undefined" &&
+    config.data instanceof FormData
+  ) {
+    if (config.headers) {
+      delete (config.headers as any)["Content-Type"];
+    }
+    return config;
+  }
   if (
     config.data &&
     (config.method === "post" ||
@@ -100,17 +112,9 @@ export const fileApi = {
     if (folderId) {
       formData.append("folderId", folderId);
     }
-    // The backend `createFile` service expects a `folderId` in `req.body`,
-    // but `multer` handles file uploads separately from body fields.
-    // We'll need to ensure the backend correctly associates the uploaded file
-    // with the current folder based on the `path` or `folderId` sent here.
-    // For now, sending `path` as before. If `folderId` is needed, it must be part of formData.
-    // formData.append('folderId', folderId); // if folderId is available and required by backend
 
     return api.post("/files/upload", formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
+      // Let the browser set the Content-Type with proper boundary for FormData
       onUploadProgress,
     });
   },
@@ -157,6 +161,7 @@ export const folderApi = {
     sortBy?: string;
     limit?: number;
     page?: number;
+    includeChildCounts?: boolean;
   }) => {
     return api.get(`/folders`, { params });
   },
