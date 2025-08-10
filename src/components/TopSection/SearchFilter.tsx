@@ -10,11 +10,6 @@ export function SearchFilter() {
       <AdvancedFilter
         onApplyFilters={async (filters) => {
           applyFilters(filters);
-          const folderIdParam =
-            state.currentFolderId &&
-            /^[0-9a-fA-F]{24}$/.test(state.currentFolderId)
-              ? state.currentFolderId
-              : null;
           await runUnifiedSearch({
             name: filters.name || undefined,
             description: filters.description || undefined,
@@ -22,9 +17,9 @@ export function SearchFilter() {
               ? filters.dateFrom.toISOString()
               : undefined,
             dateTo: filters.dateTo ? filters.dateTo.toISOString() : undefined,
-            folderId: folderIdParam,
             page: state.currentPage,
             limit: state.itemsPerPage,
+            includeChildCounts: true,
           });
         }}
         onClearFilters={async () => {

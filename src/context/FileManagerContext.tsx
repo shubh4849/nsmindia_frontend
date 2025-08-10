@@ -68,12 +68,14 @@ interface FileManagerState {
   mainExpandedIds: Set<string>;
   mainChildrenByParent: Record<string, FileItem[]>;
   selectedMainFolderId: string | null;
+  isSearchMode: boolean;
 }
 
 type FileManagerAction =
   | { type: "SET_CURRENT_PATH"; payload: string[] }
   | { type: "SET_SELECTED_FILE"; payload: FileItem | null }
   | { type: "SET_SEARCH_QUERY"; payload: string }
+  | { type: "SET_SEARCH_MODE"; payload: boolean }
   | { type: "ADD_UPLOAD"; payload: UploadProgress }
   | {
       type: "UPDATE_UPLOAD";
@@ -191,6 +193,7 @@ const initialState: FileManagerState = {
   mainExpandedIds: new Set<string>(),
   mainChildrenByParent: {},
   selectedMainFolderId: null,
+  isSearchMode: false,
 };
 
 function fileManagerReducer(
@@ -204,6 +207,8 @@ function fileManagerReducer(
       return { ...state, selectedFile: action.payload };
     case "SET_SEARCH_QUERY":
       return { ...state, searchQuery: action.payload, currentPage: 1 };
+    case "SET_SEARCH_MODE":
+      return { ...state, isSearchMode: action.payload };
     case "ADD_UPLOAD":
       return { ...state, uploads: [...state.uploads, action.payload] };
     case "UPDATE_UPLOAD":
@@ -498,6 +503,7 @@ interface FileManagerContextType {
     folderId?: string | null;
     page?: number;
     limit?: number;
+    includeChildCounts?: boolean;
   }) => Promise<void>;
 }
 
@@ -654,8 +660,11 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
           type: "SET_ROOT_FOLDER_ID",
           payload: (rootFolder as any).id,
         });
-        // Do not set currentFolderId here; homepage should remain root list until user navigates
-        if (state.currentFolderId === null) {
+        // Do not set currentFolderId or override breadcrumb here; only user actions should set path
+        // Initialize breadcrumb to Root only if it's currently empty
+        // and avoid stomping on user-chosen path during revalidations
+        // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+        if (!state.currentPath || state.currentPath.length === 0) {
           dispatch({ type: "SET_CURRENT_PATH", payload: ["Root"] });
         }
       } else {
@@ -674,6 +683,7 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
 
   const fetchFiles = useCallback(async () => {
     dispatch({ type: "SET_LOADING", payload: true });
+    dispatch({ type: "SET_SEARCH_MODE", payload: false });
     try {
       // const folderIdParam = isValidObjectId(state.currentFolderId)
       //   ? state.currentFolderId
@@ -1228,7 +1238,9 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
       folderId?: string | null;
       page?: number;
       limit?: number;
+      includeChildCounts?: boolean;
     }) => {
+      dispatch({ type: "SET_SEARCH_MODE", payload: true });
       const res = await folderApi.unifiedSearch(params);
       const folders = (res.data.folders || []).map(
         (f: any) => ({ ...f, id: f.id || f._id, type: "folder" } as FileItem)
@@ -1241,22 +1253,9 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
         type: "SET_FILES_AND_TOTAL",
         payload: { files: combined, total: combined.length },
       });
-      // Reveal all folder paths returned (best effort)
-      for (const f of folders) {
-        await revealFolderInMain(f.id);
-      }
-      // Reveal parent paths for files as well
-      for (const file of files) {
-        const parentId = (file as any).folderId;
-        if (
-          typeof parentId === "string" &&
-          /^[0-9a-fA-F]{24}$/.test(parentId)
-        ) {
-          await revealFolderInMain(parentId);
-        }
-      }
+      // Do not auto-expand or set breadcrumb on search; only explicit clicks should change path
     },
-    [dispatch, revealFolderInMain]
+    [dispatch]
   );
 
   useEffect(() => {

@@ -250,34 +250,16 @@ export const folderApi = {
     return api.get(`/folders/root/contents`, { params });
   },
   unifiedSearch: (params: {
-    q?: string;
     name?: string;
     description?: string;
     dateFrom?: string;
     dateTo?: string;
-    folderId?: string | null; // use null literal for root
     page?: number;
     limit?: number;
+    includeChildCounts?: boolean;
   }) => {
     const searchParams: any = { ...params };
-    if (typeof params.folderId !== "undefined") {
-      searchParams.folderId =
-        params.folderId === null ? "null" : params.folderId;
-    }
     return api.get(`/folders/search`, { params: searchParams });
-  },
-  getFilteredFolderContents: (
-    folderId: string,
-    params?: {
-      q?: string;
-      type?: string;
-      dateFrom?: string;
-      dateTo?: string;
-      page?: number;
-      limit?: number;
-    }
-  ) => {
-    return api.get(`/folders/${folderId}/filtered`, { params });
   },
   getFoldersCount: () => {
     return api.get(`/folders/count`);

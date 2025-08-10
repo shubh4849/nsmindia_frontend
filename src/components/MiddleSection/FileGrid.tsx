@@ -42,6 +42,7 @@ export function FileList() {
     mainExpandedIds,
     mainChildrenByParent,
     selectedMainFolderId,
+    isSearchMode,
   } = state;
   const { currentPath } = state as any;
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -68,8 +69,15 @@ export function FileList() {
     return fromTree ? ["Root", ...fromTree] : ["Root"];
   };
 
+  const getBadgeCount = (node: any): number | undefined => {
+    if (node?.type !== "folder") return undefined;
+    const folders = node?.counts?.childFolders ?? node?.totalChildFolders ?? 0;
+    const files = node?.counts?.childFiles ?? node?.totalChildFiles ?? 0;
+    return (folders as number) + (files as number);
+  };
+
   // We always list root folders at top-level and support inline expansion under each
-  const displayedItems = rootFoldersWithCounts;
+  const displayedItems = isSearchMode ? state.files : rootFoldersWithCounts;
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedItems = displayedItems.slice(
     startIndex,
@@ -79,6 +87,10 @@ export function FileList() {
   const handleFileClick = (item: FileItem) => {
     if (item.type === "folder") {
       void handleExpandToggle(item);
+      // Explicitly set breadcrumb path from tree names when user clicks
+      const segs = findPathById(item.id);
+      setBreadcrumbPath(segs);
+      selectMainFolder(item.id);
     } else {
       selectFile(item);
     }
@@ -265,12 +277,7 @@ export function FileList() {
               file={child}
               size={18}
               className="mr-2 flex-shrink-0"
-              badgeCount={
-                child.type === "folder"
-                  ? ((child as any).totalChildFolders || 0) +
-                    ((child as any).totalChildFiles || 0)
-                  : undefined
-              }
+              badgeCount={getBadgeCount(child as any)}
             />
             <span className="text-sm truncate">
               {child.type === "file" && (child as any).originalName
@@ -280,6 +287,16 @@ export function FileList() {
           </div>
           <div className="text-sm text-muted-foreground truncate pr-2">
             {child.description || "---"}
+            {isSearchMode && (
+              <div className="text-xs text-muted-foreground mt-1">
+                {(() => {
+                  const pathSegs = findPathById(
+                    child.type === "file" ? (child as any).folderId : child.id
+                  );
+                  return Array.isArray(pathSegs) ? pathSegs.join(" / ") : "";
+                })()}
+              </div>
+            )}
           </div>
           <div className="text-sm text-muted-foreground">
             {formatDate(child.createdAt)}
@@ -449,12 +466,7 @@ export function FileList() {
                   file={item}
                   size={20}
                   className="mr-2 flex-shrink-0"
-                  badgeCount={
-                    item.type === "folder"
-                      ? ((item as any).totalChildFolders || 0) +
-                        ((item as any).totalChildFiles || 0)
-                      : undefined
-                  }
+                  badgeCount={getBadgeCount(item as any)}
                 />
                 <span className="font-medium text-sm truncate">
                   {item.name}
@@ -466,6 +478,18 @@ export function FileList() {
                 onDoubleClick={() => handleFileDoubleClick(item)}
               >
                 {item.description || "---"}
+                {isSearchMode && (
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {(() => {
+                      const pathSegs = findPathById(
+                        item.type === "file" ? (item as any).folderId : item.id
+                      );
+                      return Array.isArray(pathSegs)
+                        ? pathSegs.join(" / ")
+                        : "";
+                    })()}
+                  </div>
+                )}
               </div>
               <div
                 className="text-sm text-muted-foreground pr-2"

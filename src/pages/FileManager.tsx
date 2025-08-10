@@ -6,10 +6,9 @@ import { ActionMenu } from "@/components/TopSection/ActionMenu";
 import { SearchFilter } from "@/components/TopSection/SearchFilter";
 import { FolderTree } from "@/components/LeftSection/FolderTree";
 import { UploadProgress } from "@/components/LeftSection/UploadProgress";
-import { SummaryCounters } from "@/components/LeftSection/SummaryCounters"; // Import the new component
-import { FileList } from "@/components/MiddleSection/FileGrid"; // Renamed from FileGrid
+import { SummaryCounters } from "@/components/LeftSection/SummaryCounters";
+import { FileList } from "@/components/MiddleSection/FileGrid";
 import { Pagination } from "@/components/MiddleSection/Pagination";
-import { DocumentViewer } from "@/components/RightSection/DocumentViewer";
 import { CreateFolderModal } from "@/components/Modals/CreateFolderModal";
 import { UploadFileModal } from "@/components/Modals/UploadFileModal";
 
@@ -21,14 +20,14 @@ export function FileManager() {
     isUploadFileModalOpen,
     isLoading,
     folderToCreateInId,
-    folderToCreateParentPath, // Destructure the new state variable
+    folderToCreateParentPath,
   } = state;
 
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Top Section - Header */}
-      <header className="h-16 border-b border-border bg-surface flex items-center justify-between px-6">
-        <div className="flex items-center space-x-4">
+      <header className="h-auto md:h-16 border-b border-border bg-surface flex flex-col md:flex-row md:items-center md:justify-between gap-2 px-4 md:px-6 py-2">
+        <div className="flex items-center justify-between md:justify-start space-x-2 md:space-x-4">
           <Button
             variant="ghost"
             size="sm"
@@ -36,27 +35,27 @@ export function FileManager() {
             className="hover:bg-primary-light text-primary"
           >
             {isLeftPanelOpen ? (
-              <PanelLeftClose size={18} className="text-muted-foreground" />
+              <PanelLeftClose size={20} className="text-muted-foreground" />
             ) : (
-              <PanelLeftOpen size={18} className="text-muted-foreground" />
+              <PanelLeftOpen size={20} className="text-muted-foreground" />
             )}
           </Button>
           <Breadcrumb />
         </div>
 
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center flex-wrap gap-2 md:gap-4">
           <SearchFilter />
           <ActionMenu />
         </div>
       </header>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Left Section - Folder Tree */}
         {isLeftPanelOpen && (
-          <aside className="w-80 border-r border-border bg-sidebar-background flex flex-col">
-            <SummaryCounters /> {/* Add SummaryCounters here */}
-            <div className="flex-1 overflow-hidden">
+          <aside className="w-full md:w-80 border-b md:border-b-0 md:border-r border-border bg-sidebar-background flex flex-col max-h-60 md:max-h-none">
+            <SummaryCounters />
+            <div className="flex-1 overflow-auto">
               <FolderTree />
             </div>
             <UploadProgress />
@@ -65,17 +64,15 @@ export function FileManager() {
 
         {/* Middle Section - File Grid */}
         <main className="flex-1 flex flex-col min-w-0">
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-auto">
             <FileList />
           </div>
-          <Pagination />
+          <div className="border-t border-border">
+            <Pagination />
+          </div>
         </main>
-
-        {/* Right Section - Document Viewer */}
-        {/* <aside className="w-96 border-l border-border">
-          <DocumentViewer />
-        </aside> */}
       </div>
+
       {isLoading && (
         <div className="absolute inset-0 bg-background/70 flex items-center justify-center z-50">
           <div className="flex flex-col items-center">
@@ -107,7 +104,7 @@ export function FileManager() {
         isOpen={isCreateFolderModalOpen}
         onClose={() => dispatch({ type: "CLOSE_CREATE_FOLDER_MODAL" })}
         parentFolderId={folderToCreateInId}
-        parentFolderCurrentPath={folderToCreateParentPath} // Pass the new prop
+        parentFolderCurrentPath={folderToCreateParentPath}
       />
       <UploadFileModal
         isOpen={isUploadFileModalOpen}
