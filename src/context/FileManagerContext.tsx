@@ -16,7 +16,7 @@ export interface FileItem {
   size?: string;
   createdAt: string;
   modifiedAt: string;
-  path: string; // This will now represent the full path string like "Root/Documents/" or "Root/"
+  path: string;
   parentId?: string;
   url?: string;
   children?: FileItem[];
@@ -24,7 +24,6 @@ export interface FileItem {
   mimeType?: string;
 }
 
-// New interface for folders displayed in the main grid with counts
 export interface FolderItemWithCounts extends FileItem {
   totalChildFolders: number;
   totalChildFiles: number;
@@ -69,6 +68,7 @@ interface FileManagerState {
   mainChildrenByParent: Record<string, FileItem[]>;
   selectedMainFolderId: string | null;
   isSearchMode: boolean;
+  folderMetaById: Record<string, { name: string; parentId: string | null }>;
 }
 
 type FileManagerAction =
@@ -76,6 +76,10 @@ type FileManagerAction =
   | { type: "SET_SELECTED_FILE"; payload: FileItem | null }
   | { type: "SET_SEARCH_QUERY"; payload: string }
   | { type: "SET_SEARCH_MODE"; payload: boolean }
+  | {
+      type: "MERGE_FOLDER_META";
+      payload: Record<string, { name: string; parentId: string | null }>;
+    }
   | { type: "ADD_UPLOAD"; payload: UploadProgress }
   | {
       type: "UPDATE_UPLOAD";
@@ -107,7 +111,7 @@ type FileManagerAction =
   | { type: "CLOSE_CREATE_FOLDER_MODAL" }
   | {
       type: "OPEN_UPLOAD_FILE_MODAL";
-      payload: { parentId: string | null; parentPath: string[] }; // Updated payload
+      payload: { parentId: string | null; parentPath: string[] };
     }
   | { type: "CLOSE_UPLOAD_FILE_MODAL" }
   | { type: "SET_CURRENT_FOLDER_ID"; payload: string | null }
@@ -165,7 +169,7 @@ type FileManagerAction =
 
 const initialState: FileManagerState = {
   currentPath: ["Root"],
-  currentFolderId: null, // Start with null for root
+  currentFolderId: null,
   selectedFile: null,
   files: [],
   searchQuery: "",
@@ -178,22 +182,23 @@ const initialState: FileManagerState = {
   expandedFolders: new Set(["root"]),
   isCreateFolderModalOpen: false,
   isUploadFileModalOpen: false,
-  isLoading: false, // Initial loading state
+  isLoading: false,
   folderTree: [],
   rootFolderId: null,
   totalFiles: 0,
-  totalFolders: 0, // Initialize to 0
-  totalDocuments: 0, // Initialize to 0
-  filterByDescription: "", // Initialize to empty string
-  filterDateFrom: undefined, // Initialize to undefined
-  filterDateTo: undefined, // Initialize to undefined
-  folderToCreateInId: null, // Initialize to null
-  folderToCreateParentPath: ["Root"], // Initialize with Root path
-  rootFoldersWithCounts: [], // Initialize root folders with counts array
+  totalFolders: 0,
+  totalDocuments: 0,
+  filterByDescription: "",
+  filterDateFrom: undefined,
+  filterDateTo: undefined,
+  folderToCreateInId: null,
+  folderToCreateParentPath: ["Root"],
+  rootFoldersWithCounts: [],
   mainExpandedIds: new Set<string>(),
   mainChildrenByParent: {},
   selectedMainFolderId: null,
   isSearchMode: false,
+  folderMetaById: {},
 };
 
 function fileManagerReducer(
@@ -209,6 +214,13 @@ function fileManagerReducer(
       return { ...state, searchQuery: action.payload, currentPage: 1 };
     case "SET_SEARCH_MODE":
       return { ...state, isSearchMode: action.payload };
+    case "MERGE_FOLDER_META": {
+      const next = { ...state.folderMetaById };
+      for (const [id, meta] of Object.entries(action.payload)) {
+        next[id] = meta;
+      }
+      return { ...state, folderMetaById: next };
+    }
     case "ADD_UPLOAD":
       return { ...state, uploads: [...state.uploads, action.payload] };
     case "UPDATE_UPLOAD":
@@ -265,22 +277,22 @@ function fileManagerReducer(
       return {
         ...state,
         isCreateFolderModalOpen: true,
-        folderToCreateInId: action.payload.parentId, // Set the target parent ID
-        folderToCreateParentPath: action.payload.parentPath, // Set the parent path
+        folderToCreateInId: action.payload.parentId,
+        folderToCreateParentPath: action.payload.parentPath,
       };
     case "CLOSE_CREATE_FOLDER_MODAL":
       return {
         ...state,
         isCreateFolderModalOpen: false,
-        folderToCreateInId: null, // Clear the target parent ID on close
-        folderToCreateParentPath: ["Root"], // Reset parent path on close
+        folderToCreateInId: null,
+        folderToCreateParentPath: ["Root"],
       };
     case "OPEN_UPLOAD_FILE_MODAL":
       return {
         ...state,
         isUploadFileModalOpen: true,
-        folderToCreateInId: action.payload.parentId, // Set the target parent ID for upload
-        folderToCreateParentPath: action.payload.parentPath, // Set parent path
+        folderToCreateInId: action.payload.parentId,
+        folderToCreateParentPath: action.payload.parentPath,
       };
     case "CLOSE_UPLOAD_FILE_MODAL":
       return { ...state, isUploadFileModalOpen: false };
@@ -302,7 +314,7 @@ function fileManagerReducer(
         filterByDescription: action.payload.description,
         filterDateFrom: action.payload.dateFrom,
         filterDateTo: action.payload.dateTo,
-        currentPage: 1, // Reset to first page on filter change
+        currentPage: 1,
       };
     case "SET_ROOT_FOLDERS":
       return { ...state, rootFoldersWithCounts: action.payload };
@@ -336,7 +348,7 @@ function fileManagerReducer(
       const key = parentId ?? "__root__";
       const existing = next[key] || [];
       next[key] = [...existing, child];
-      // If adding at root level and child is folder, also reflect in rootFoldersWithCounts
+
       let rootFoldersWithCounts = state.rootFoldersWithCounts;
       if (!parentId && child.type === "folder") {
         rootFoldersWithCounts = [
@@ -359,7 +371,7 @@ function fileManagerReducer(
           }
           return n;
         });
-      // If parentId is null, push at top level as folder
+
       const updatedTree = parentId
         ? addToTree(state.folderTree)
         : [...state.folderTree, child];
@@ -395,7 +407,7 @@ function fileManagerReducer(
     }
     case "ADJUST_FOLDER_COUNTS": {
       const { folderId, deltaFolders = 0, deltaFiles = 0 } = action.payload;
-      // Update root list entries
+
       const updatedRoot = state.rootFoldersWithCounts.map((f) =>
         f.id === folderId
           ? {
@@ -411,7 +423,7 @@ function fileManagerReducer(
             }
           : f
       );
-      // Update any folder item inside mainChildrenByParent
+
       const updatedChildren: Record<string, FileItem[]> = {};
       for (const [pid, list] of Object.entries(state.mainChildrenByParent)) {
         updatedChildren[pid] = (list || []).map((it: any) =>
@@ -453,6 +465,7 @@ interface FileManagerContextType {
   state: FileManagerState;
   dispatch: React.Dispatch<FileManagerAction>;
   navigateToPath: (path: string[], folderId: string | null) => void;
+  setBreadcrumbOnly: (segments: string[]) => void;
   selectFile: (file: FileItem | null) => void;
   addUpload: (upload: UploadProgress) => void;
   updateUpload: (
@@ -460,19 +473,19 @@ interface FileManagerContextType {
     progress: number,
     status: UploadProgress["status"]
   ) => void;
-  fetchFiles: () => Promise<void>; // Add fetchFiles to context type
+  fetchFiles: () => Promise<void>;
   getCurrentFiles: () => FileItem[];
   getFilteredFiles: () => FileItem[];
   openCreateFolderModal: (parentId: string | null) => void;
   closeCreateFolderModal: () => void;
-  openUploadFileModal: (parentId: string | null) => void; // Update signature to accept parentId
+  openUploadFileModal: (parentId: string | null) => void;
   closeUploadFileModal: () => void;
   fetchFolderTree: () => Promise<void>;
   fetchFolderChildren: (parentId: string) => Promise<void>;
   fetchMainChildren: (parentId: string) => Promise<void>;
   toggleMainExpand: (folderId: string) => void;
   selectMainFolder: (folderId: string | null) => void;
-  fetchRootFolders: () => Promise<void>; // New function for fetching root folders
+  fetchRootFolders: () => Promise<void>;
   applyFilters: (filters: {
     name: string;
     description: string;
@@ -482,7 +495,9 @@ interface FileManagerContextType {
   clearFilters: () => void;
   setBreadcrumbPath: (segments: string[]) => void;
   clearMainExploration: () => void;
-  // Optimistic helpers
+  getPathSegmentsFor: (folderId: string | null) => string[];
+  setBreadcrumbToFolderId: (folderId: string) => void;
+
   optimisticAddChild: (parentId: string | null, child: FileItem) => void;
   optimisticAddTreeChild: (parentId: string | null, child: FileItem) => void;
   revalidateQuietly: (parentId: string | null) => void;
@@ -517,25 +532,18 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
   const folderEventSourceRef = useRef<EventSource | null>(null);
   const revalidateTimersRef = useRef<Map<string, number>>(new Map());
 
-  // Helper to check if a value is a valid MongoDB ObjectId (24 hex characters)
   const isValidObjectId = useCallback((value: unknown): value is string => {
     return typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
   }, []);
 
-  // Helper to resolve folderId by path - NO LONGER USED, REMOVE OR SIMPLIFY
-  // Keeping it for now but it will be removed in next step
-  // const resolveFolderIdByPath = (path: string[]): string | null => {
-  //   // Simplified logic: find the folder in the tree that matches the path
-  //   // This assumes paths are unique and accurately reflect the tree structure
-  //   const targetPath = path.join("/") + (path.length > 0 ? "/" : "");
-  //   const folder = state.folderTree.find(
-  //     (f) => f.type === "folder" && f.path === targetPath
-  //   );
-  //   return folder ? folder.id : null;
-  // };
-
   const navigateToPath = useCallback(
     (path: string[], folderId: string | null) => {
+      console.log(
+        "[navigateToPath] setting path:",
+        path,
+        "folderId:",
+        folderId
+      );
       dispatch({ type: "SET_CURRENT_PATH", payload: path });
       // Prioritize the provided folderId, if valid
       // const resolvedId = folderId ?? resolveFolderIdByPath(path);
@@ -544,6 +552,37 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     },
     []
   );
+
+  // Compute breadcrumb segments from folderMetaById
+  const getPathSegmentsFor = useCallback(
+    (folderId: string | null): string[] => {
+      if (!folderId) return ["Root"];
+      const names: string[] = [];
+      let cursor: string | null = folderId;
+      let guard = 0;
+      while (cursor && guard < 100) {
+        const meta = (state.folderMetaById as any)[cursor];
+        if (!meta) break;
+        names.push(meta.name);
+        cursor = meta.parentId;
+        guard += 1;
+      }
+      return ["Root", ...names.reverse()];
+    },
+    [state.folderMetaById]
+  );
+
+  const setBreadcrumbToFolderId = useCallback(
+    (folderId: string) => {
+      const segs = getPathSegmentsFor(folderId);
+      navigateToPath(segs, folderId);
+    },
+    [getPathSegmentsFor, navigateToPath]
+  );
+
+  const setBreadcrumbOnly = useCallback((segments: string[]) => {
+    dispatch({ type: "SET_CURRENT_PATH", payload: segments });
+  }, []);
 
   const selectFile = useCallback((file: FileItem | null) => {
     dispatch({ type: "SET_SELECTED_FILE", payload: file });
@@ -556,12 +595,10 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     const eventSource = sseApi.getUploadProgress(upload.id);
     uploadEventSourcesRef.current.set(upload.id, eventSource);
 
-    // Log on open
     eventSource.onopen = () => {
       console.log("[SSE upload open]", upload.id);
     };
 
-    // Also attach generic message listener in addition to onmessage
     eventSource.addEventListener("message", (event: MessageEvent) => {
       try {
         const data = JSON.parse((event as any).data);
@@ -587,13 +624,11 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    // Handle timeout event explicitly
     eventSource.addEventListener("timeout", (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data || "{}");
         console.warn("[SSE upload timeout]", upload.id, data);
-        // Do NOT mark as error; backend keeps the stream open for late updates
-        // Maintain uploading state and optionally set progress to last known or 0
+
         dispatch({
           type: "UPDATE_UPLOAD",
           payload: {
@@ -609,13 +644,11 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
           payload: { id: upload.id, progress: 0, status: "uploading" },
         });
       }
-      // Intentionally keep the EventSource open for late updates
     });
 
-    // Optional: honor connected and ping events for UI stability
     eventSource.addEventListener("connected", () => {
       console.log("[SSE upload connected]", upload.id);
-      // Ensure an initial 0% entry is visible
+
       dispatch({
         type: "UPDATE_UPLOAD",
         payload: { id: upload.id, progress: 0, status: "uploading" },
@@ -623,12 +656,11 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     });
     eventSource.addEventListener("ping", () => {
       console.log("[SSE upload ping]", upload.id);
-      // Heartbeat received; no state change required
     });
 
     eventSource.onerror = (error) => {
       console.warn("SSE closed or errored for upload", upload.id, error);
-      // Keep local status; do not force error here since completion may still succeed
+
       eventSource.close();
       uploadEventSourcesRef.current.delete(upload.id);
     };
@@ -649,6 +681,21 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
       const tree: FileItem[] = Array.isArray(raw)
         ? raw
         : raw?.results || raw?.tree || raw?.folders || raw?.data || [];
+      // Merge meta from tree
+      const meta: Record<string, { name: string; parentId: string | null }> =
+        {};
+      const collect = (nodes: any[]) => {
+        for (const n of nodes || []) {
+          if (n && n.id)
+            meta[n.id] = {
+              name: n.name,
+              parentId: (n as any).parentId ?? null,
+            };
+          if (n.children) collect(n.children);
+        }
+      };
+      collect(tree as any);
+      dispatch({ type: "MERGE_FOLDER_META", payload: meta });
 
       const rootFolder = Array.isArray(tree)
         ? tree.find(
@@ -660,15 +707,11 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
           type: "SET_ROOT_FOLDER_ID",
           payload: (rootFolder as any).id,
         });
-        // Do not set currentFolderId or override breadcrumb here; only user actions should set path
-        // Initialize breadcrumb to Root only if it's currently empty
-        // and avoid stomping on user-chosen path during revalidations
-        // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+
         if (!state.currentPath || state.currentPath.length === 0) {
           dispatch({ type: "SET_CURRENT_PATH", payload: ["Root"] });
         }
       } else {
-        // If no root folder, ensure current folder is null
         if (state.currentFolderId !== null) {
           dispatch({ type: "SET_CURRENT_FOLDER_ID", payload: null });
           dispatch({ type: "SET_CURRENT_PATH", payload: ["Root"] });
@@ -685,15 +728,10 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "SET_LOADING", payload: true });
     dispatch({ type: "SET_SEARCH_MODE", payload: false });
     try {
-      // const folderIdParam = isValidObjectId(state.currentFolderId)
-      //   ? state.currentFolderId
-      //   : undefined;
-
       let response;
-      let combinedContents: FileItem[] = []; // Declare combinedContents
-      let totalCombined: number = 0; // Declare totalCombined
+      let combinedContents: FileItem[] = [];
+      let totalCombined: number = 0;
 
-      // If there's a search query, use searchFiles
       if (state.searchQuery) {
         response = await fileApi.searchFiles({
           q: state.searchQuery,
@@ -712,7 +750,6 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
           payload: { files: combinedContents, total: totalCombined },
         });
       } else {
-        // If currentFolderId is null (homepage/root), fetch root folders with counts.
         if (state.currentFolderId === null) {
           console.log(
             "Fetching root contents (folders + files) for main content area..."
@@ -749,6 +786,14 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
               }
             })
           );
+          // Merge meta from root folders
+          const meta: Record<
+            string,
+            { name: string; parentId: string | null }
+          > = {};
+          for (const f of foldersWithCounts as any[])
+            meta[f.id] = { name: f.name, parentId: f.parentId ?? null };
+          dispatch({ type: "MERGE_FOLDER_META", payload: meta });
 
           dispatch({
             type: "SET_FILES_AND_TOTAL",
@@ -776,6 +821,18 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
             ...f,
             type: "folder",
           }));
+          // Merge meta from children folders
+          const meta: Record<
+            string,
+            { name: string; parentId: string | null }
+          > = {};
+          for (const f of mappedFolders as any[])
+            meta[(f as any).id || (f as any)._id] = {
+              name: f.name,
+              parentId: (f as any).parentId ?? null,
+            };
+          dispatch({ type: "MERGE_FOLDER_META", payload: meta });
+
           const mappedFiles: FileItem[] = (
             folderContentsResponse.data.files || []
           ).map((f: any) => ({
@@ -794,10 +851,9 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
               total: totalCombinedForFolder,
             },
           });
-          // Clear rootFoldersWithCounts when navigating into a specific folder
+
           dispatch({ type: "SET_ROOT_FOLDERS", payload: [] });
         } else {
-          // Fallback if no valid folderId
           console.warn("No valid folder ID to fetch contents for.");
           dispatch({
             type: "SET_FILES_AND_TOTAL",
@@ -811,7 +867,7 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
       dispatch({
         type: "SET_FILES_AND_TOTAL",
         payload: { files: [], total: 0 },
-      }); // Clear files on error
+      });
     } finally {
       dispatch({ type: "SET_LOADING", payload: false });
     }
@@ -826,7 +882,6 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
   ]);
 
   const getCurrentFiles = useCallback((): FileItem[] => {
-    // This function will now apply client-side filtering based on advanced filters
     let filtered = state.files;
 
     if (state.filterByDescription) {
@@ -854,7 +909,7 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     state.filterDateTo,
   ]);
 
-  const getFilteredFiles = getCurrentFiles; // getFilteredFiles now just calls getCurrentFiles
+  const getFilteredFiles = getCurrentFiles;
 
   const openCreateFolderModal = useCallback(
     (targetParentId: string | null = null) => {
@@ -864,7 +919,6 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
       );
       console.log("Current state.folderTree:", state.folderTree);
 
-      // Determine the parent path based on targetParentId
       let parentPath: string[] = ["Root"];
       if (targetParentId) {
         const parentFolder = state.folderTree.find(
@@ -914,7 +968,6 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
 
   const openUploadFileModal = useCallback(
     (parentId: string | null = null) => {
-      // Resolve the parent path based on parentId
       let parentPath: string[] = ["Root"];
       if (parentId && state.folderTree) {
         const findPath = (
@@ -1072,6 +1125,15 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
           }
         })
       );
+      // Merge meta
+      const meta: Record<string, { name: string; parentId: string | null }> =
+        {};
+      for (const f of foldersWithCounts as any[])
+        meta[f.id] = {
+          name: (f as any).name,
+          parentId: (f as any).parentId ?? null,
+        };
+      dispatch({ type: "MERGE_FOLDER_META", payload: meta });
       const childFiles: FileItem[] = (res.data.files || []).map((f: any) => ({
         ...f,
         id: f.id || f._id,
@@ -1105,7 +1167,7 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
           const [childFoldersCountResponse, childFilesCountResponse] =
             await Promise.all([
               folderApi.getDirectChildFoldersCount(folder.id),
-              folderApi.getDirectChildFilesCount(folder.id), // Corrected: Should be folderApi.getDirectChildFilesCount
+              folderApi.getDirectChildFilesCount(folder.id),
             ]);
           return {
             ...folder,
@@ -1132,7 +1194,6 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     }
   }, [state.currentPage, state.itemsPerPage]);
 
-  // Debounced subtle revalidation that preserves UI state
   const scheduleRevalidate = useCallback(
     (parentId: string | null) => {
       const key = parentId ?? "__root__";
@@ -1158,7 +1219,6 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     [fetchMainChildren, fetchRootFolders, fetchCounts, fetchFolderTree]
   );
 
-  // Find path of folder ids from root to target
   const findPathIds = useCallback(
     (targetId: string): string[] | null => {
       const dfs = (nodes: FileItem[], acc: string[]): string[] | null => {
@@ -1177,14 +1237,12 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     [state.folderTree]
   );
 
-  // Expand all ancestors along the path and fetch their children so the chain is visible
   const revealFolderInMain = useCallback(
     async (folderId: string) => {
       const pathIds = findPathIds(folderId);
       if (!pathIds || pathIds.length === 0) return;
-      // Expand each id in order; fetch children to populate the next level
+
       for (const id of pathIds) {
-        // If not expanded yet, toggle open
         if (!state.mainExpandedIds.has(id)) {
           dispatch({ type: "TOGGLE_MAIN_EXPAND", payload: id });
         }
@@ -1192,7 +1250,7 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
           await fetchMainChildren(id);
         } catch {}
       }
-      // Update breadcrumb path using names from tree
+
       const namesFromTree = (() => {
         const names: string[] = ["Root"];
         const collect = (
@@ -1227,7 +1285,6 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     ]
   );
 
-  // Unified search using backend endpoint, then reveal any nested folder results
   const runUnifiedSearch = useCallback(
     async (params: {
       q?: string;
@@ -1253,22 +1310,18 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
         type: "SET_FILES_AND_TOTAL",
         payload: { files: combined, total: combined.length },
       });
-      // Do not auto-expand or set breadcrumb on search; only explicit clicks should change path
     },
     [dispatch]
   );
 
   useEffect(() => {
-    // Initial data fetch on component mount
     fetchFolderTree();
     fetchFiles();
     fetchCounts();
   }, [fetchFolderTree, fetchFiles, fetchCounts]);
 
-  // SSE for folder updates in the current folder
   useEffect(() => {
     if (isValidObjectId(state.currentFolderId)) {
-      // Close existing EventSource if open
       if (folderEventSourceRef.current) {
         folderEventSourceRef.current.close();
         console.log(
@@ -1284,7 +1337,6 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
       const eventSource = sseApi.getFolderUpdates(state.currentFolderId);
       folderEventSourceRef.current = eventSource;
 
-      // Some servers use named events. Listen to both default and named
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
         console.log("SSE Folder Update:", data);
@@ -1320,12 +1372,11 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
         }
       };
     } else if (folderEventSourceRef.current) {
-      // If currentFolderId becomes null, close any active SSE connection
       folderEventSourceRef.current.close();
       folderEventSourceRef.current = null;
       console.log("Closed folder SSE because currentFolderId is null.");
     }
-  }, [state.currentFolderId, fetchFiles, fetchFolderTree, isValidObjectId]); // Added isValidObjectId dependency
+  }, [state.currentFolderId, fetchFiles, fetchFolderTree, isValidObjectId]);
 
   return (
     <FileManagerContext.Provider
@@ -1335,6 +1386,9 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
         navigateToPath,
         setBreadcrumbPath: (segments: string[]) =>
           dispatch({ type: "SET_CURRENT_PATH", payload: segments }),
+        setBreadcrumbOnly,
+        getPathSegmentsFor,
+        setBreadcrumbToFolderId,
         selectFile,
         addUpload,
         updateUpload,
@@ -1359,7 +1413,7 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
         revalidateQuietly: scheduleRevalidate,
         revealFolderInMain,
         runUnifiedSearch,
-        // Optimistic helpers
+
         optimisticAddChild: (parentId: string | null, child: FileItem) =>
           dispatch({
             type: "OPTIMISTIC_ADD_CHILD",
@@ -1404,7 +1458,6 @@ export function useFileManager() {
   return context;
 }
 
-// Utility function to parse size strings
 function parseSize(sizeStr: string): number {
   const sizeMap: { [key: string]: number } = {
     KB: 1024,
@@ -1414,6 +1467,3 @@ function parseSize(sizeStr: string): number {
   const [value, unit] = sizeStr.split(" ");
   return parseFloat(value) * (sizeMap[unit.toUpperCase()] || 1);
 }
-
-// Remove mock data as it's replaced by API calls
-// const mockFileData: FileItem[] = [...];

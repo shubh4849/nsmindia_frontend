@@ -10,22 +10,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFileManager } from "@/context/FileManagerContext";
-import { validateFileName } from "@/utils/fileUtils"; // Removed generateId and buildFilePath
+import { validateFileName } from "@/utils/fileUtils";
 import { toast } from "@/hooks/use-toast";
-import { folderApi } from "@/services/api"; // Import folderApi
+import { folderApi } from "@/services/api";
 
 interface CreateFolderModalProps {
   isOpen: boolean;
   onClose: () => void;
-  parentFolderId: string | null; // New prop for the parent folder's ID
-  parentFolderCurrentPath: string[]; // New prop for the parent folder's current path
+  parentFolderId: string | null;
+  parentFolderCurrentPath: string[];
 }
 
 export function CreateFolderModal({
   isOpen,
   onClose,
   parentFolderId,
-  parentFolderCurrentPath, // Destructure the new prop
+  parentFolderCurrentPath,
 }: CreateFolderModalProps) {
   const [folderName, setFolderName] = useState("");
   const [description, setDescription] = useState("");
@@ -55,7 +55,6 @@ export function CreateFolderModal({
     setIsCreating(true);
 
     try {
-      // Call the backend API to create a folder
       console.log("Calling folderApi.createFolder with:", {
         folderName,
         description: description.trim(),
@@ -66,9 +65,9 @@ export function CreateFolderModal({
       const resp = await folderApi.createFolder(
         folderName,
         description.trim(),
-        // Pass the new folder's path as an array; the API will join it and add the trailing slash
+
         [...parentFolderCurrentPath, folderName].filter(Boolean),
-        parentFolderId ?? undefined // Use the parentFolderId from props
+        parentFolderId ?? undefined
       );
 
       toast({
@@ -76,7 +75,6 @@ export function CreateFolderModal({
         description: `"${folderName}" has been created successfully.`,
       });
 
-      // Optimistic update of current view and tree
       const folder = (resp as any)?.data ?? {
         id: crypto.randomUUID?.() || `${Date.now()}`,
         name: folderName,
@@ -87,18 +85,17 @@ export function CreateFolderModal({
         modifiedAt: new Date().toISOString(),
       };
       const child = { ...folder, type: "folder" } as any;
-      // Update main inline expansion cache
-      // Note: null parent implies root list
+
       dispatch({
         type: "OPTIMISTIC_ADD_CHILD",
         payload: { parentId: parentFolderId, child },
       });
-      // Update left tree
+
       dispatch({
         type: "OPTIMISTIC_ADD_TREE_CHILD",
         payload: { parentId: parentFolderId, child },
       });
-      // Adjust badge counts on parent: +1 folder
+
       if (parentFolderId) {
         dispatch({
           type: "ADJUST_FOLDER_COUNTS",
@@ -106,10 +103,8 @@ export function CreateFolderModal({
         });
       }
 
-      // Quiet revalidation to sync counts/tree without collapsing UI
       revalidateQuietly(parentFolderId ?? null);
 
-      // Reset form and close modal
       setFolderName("");
       setDescription("");
       onClose();

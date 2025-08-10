@@ -18,8 +18,8 @@ import { fileApi } from "@/services/api";
 interface UploadFileModalProps {
   isOpen: boolean;
   onClose: () => void;
-  parentFolderId: string | null; // New prop
-  parentFolderCurrentPath: string[]; // New prop
+  parentFolderId: string | null;
+  parentFolderCurrentPath: string[];
 }
 
 interface PendingFile {
@@ -30,7 +30,6 @@ interface PendingFile {
   serverUploadId?: string;
 }
 
-// Allowed MIME types
 const IMAGE_TYPES = [
   "image/jpeg",
   "image/png",
@@ -69,7 +68,6 @@ export function UploadFileModal({
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const { addUpload, dispatch, state, revalidateQuietly } = useFileManager();
-  // no-op
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const whitelist = new Set(ACCEPTED_TYPES);
@@ -113,7 +111,7 @@ export function UploadFileModal({
       onDrop,
       onDropRejected,
       multiple: true,
-      maxSize: 100 * 1024 * 1024, // 100MB max file size
+      maxSize: 100 * 1024 * 1024,
       accept: ACCEPT_MAP,
     });
 
@@ -129,7 +127,6 @@ export function UploadFileModal({
     );
 
     try {
-      // 1) Init upload to get server-owned uploadId
       const initRes = await fileApi.initUpload({
         fileName: file.name,
         fileSize: file.size,
@@ -140,12 +137,10 @@ export function UploadFileModal({
         throw new Error("Failed to initialize upload");
       }
 
-      // Associate this pending entry with the server uploadId so we can mirror SSE progress in-modal
       setPendingFiles((prev) =>
         prev.map((f) => (f.id === id ? { ...f, serverUploadId: uploadId } : f))
       );
 
-      // 2) Start SSE progress tracking for this uploadId via context
       addUpload({
         id: uploadId,
         fileName: file.name,
@@ -153,7 +148,6 @@ export function UploadFileModal({
         status: "uploading",
       });
 
-      // 3) Perform the streaming upload; no axios onUploadProgress
       const response = await fileApi.uploadFile(
         file,
         parentFolderCurrentPath,
@@ -162,7 +156,6 @@ export function UploadFileModal({
         { fileName: file.name, fileSize: file.size }
       );
 
-      // Local card completion; SSE will set global upload to completed
       setPendingFiles((prev) =>
         prev.map((f) =>
           f.id === id ? { ...f, status: "completed", progress: 100 } : f
@@ -176,7 +169,6 @@ export function UploadFileModal({
         });
       }
 
-      // Optimistic update in lists
       const createdFile = (response as any).data?.file;
       const newFile = createdFile || {
         id: (typeof crypto !== "undefined" && (crypto as any).randomUUID
@@ -244,7 +236,7 @@ export function UploadFileModal({
           description: `Successfully uploaded ${filesToUpload.length} file(s)`,
         });
       }
-      // Do not refetch; we already optimistically updated the UI
+
       setPendingFiles([]);
       onClose();
     } finally {
@@ -259,7 +251,6 @@ export function UploadFileModal({
     }
   };
 
-  // Mirror SSE-driven progress/status from context into the modal's list items
   useEffect(() => {
     setPendingFiles((prev) =>
       prev.map((f) => {

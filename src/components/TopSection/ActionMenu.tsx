@@ -1,4 +1,4 @@
-import { Plus, FolderPlus, Upload } from "lucide-react";
+import { Plus, FolderPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -9,8 +9,7 @@ import {
 import { useFileManager } from "@/context/FileManagerContext";
 
 export function ActionMenu() {
-  const { state, openCreateFolderModal, openUploadFileModal } =
-    useFileManager();
+  const { state, openCreateFolderModal } = useFileManager();
   const { currentFolderId } = state;
 
   return (
@@ -32,13 +31,6 @@ export function ActionMenu() {
           >
             <FolderPlus size={16} className="mr-2 text-primary" />
             Create Folder
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={openUploadFileModal}
-            className="cursor-pointer hover:bg-surface-hover"
-          >
-            <Upload size={16} className="mr-2 text-primary" />
-            Upload Files
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

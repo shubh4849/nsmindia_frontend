@@ -15,13 +15,13 @@ export function DocumentViewer() {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [textPreviewContent, setTextPreviewContent] = useState<string | null>(
     null
-  ); // New state for text content
+  );
 
   useEffect(() => {
     const fetchPreview = async () => {
       if (!selectedFile || !isPreviewable(selectedFile)) {
         setPreviewUrl(null);
-        setTextPreviewContent(null); // Clear text content
+        setTextPreviewContent(null);
         return;
       }
 
@@ -34,17 +34,16 @@ export function DocumentViewer() {
             getFileExtension(selectedFile.name)
           )
         ) {
-          // For text files, fetch as text and create a data URL
           const response = await fileApi.getFile(selectedFile.id);
-          const textContent = response.data; // Assuming response.data is directly the text content
-          setTextPreviewContent(textContent); // Set the text content state
+          const textContent = response.data;
+          setTextPreviewContent(textContent);
           url = URL.createObjectURL(
             new Blob([textContent], {
               type: selectedFile.mimeType || "text/plain",
             })
           );
         } else {
-          setTextPreviewContent(null); // Clear text content for non-text files
+          setTextPreviewContent(null);
           const response = await fileApi.previewFile(selectedFile.id);
           const fileBlob = new Blob([response.data], {
             type: response.headers["content-type"],
@@ -60,7 +59,7 @@ export function DocumentViewer() {
           variant: "destructive",
         });
         setPreviewUrl(null);
-        setTextPreviewContent(null); // Clear text content on error
+        setTextPreviewContent(null);
       } finally {
         setLoadingPreview(false);
       }
@@ -68,13 +67,12 @@ export function DocumentViewer() {
 
     fetchPreview();
 
-    // Cleanup URL when component unmounts or selectedFile changes
     return () => {
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl);
         setPreviewUrl(null);
       }
-      setTextPreviewContent(null); // Also clear text content on cleanup
+      setTextPreviewContent(null);
     };
   }, [selectedFile]);
 
@@ -121,7 +119,6 @@ export function DocumentViewer() {
       );
     }
 
-    // Image preview
     if (
       selectedFile.mimeType?.includes("image") ||
       ["jpg", "jpeg", "png", "gif", "svg", "webp"].includes(extension)
@@ -134,14 +131,13 @@ export function DocumentViewer() {
             className="max-w-full max-h-full object-contain rounded-lg shadow-md"
             onError={(e) => {
               const target = e.target as HTMLImageElement;
-              target.src = "/placeholder-image.png"; // Fallback image
+              target.src = "/placeholder-image.png";
             }}
           />
         </div>
       );
     }
 
-    // PDF preview
     if (selectedFile.mimeType?.includes("pdf") || extension === "pdf") {
       return (
         <div className="flex-1">
@@ -154,7 +150,6 @@ export function DocumentViewer() {
       );
     }
 
-    // Video preview
     if (
       selectedFile.mimeType?.includes("video") ||
       ["mp4", "webm", "ogg"].includes(extension)
@@ -173,7 +168,6 @@ export function DocumentViewer() {
       );
     }
 
-    // Text file preview
     if (
       selectedFile.mimeType?.includes("text") ||
       ["txt", "md", "json", "xml", "csv"].includes(extension)
