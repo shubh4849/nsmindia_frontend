@@ -12,24 +12,49 @@ const api = axios.create({
   baseURL: API_BASE_URL,
 });
 
-// Helper function to recursively transform keys
-const transformKeys = (obj: any, fromKey: string, toKey: string): any => {
-  if (typeof obj !== "object" || obj === null) {
-    return obj;
-  }
-  // Do not transform FormData; it must be sent as-is
-  if (typeof FormData !== "undefined" && obj instanceof FormData) {
-    return obj;
-  }
+// Helper predicates
+const isPlainObject = (obj: any): obj is Record<string, any> => {
+  if (obj === null || typeof obj !== "object") return false;
+  const proto = Object.getPrototypeOf(obj);
+  return proto === Object.prototype || proto === null;
+};
+const isSkippableObject = (obj: any): boolean => {
+  if (typeof obj !== "object" || obj === null) return true;
+  // Skip browser-native complex objects
+  if (typeof FormData !== "undefined" && obj instanceof FormData) return true;
+  if (typeof Blob !== "undefined" && obj instanceof Blob) return true;
+  if (typeof File !== "undefined" && obj instanceof File) return true;
+  if (typeof Date !== "undefined" && obj instanceof Date) return true;
+  if (
+    typeof ArrayBuffer !== "undefined" &&
+    (obj instanceof ArrayBuffer || ArrayBuffer.isView?.(obj))
+  )
+    return true;
+  return false;
+};
+
+// Cycle-safe key transform that only touches plain JSON objects/arrays
+const transformKeys = (
+  obj: any,
+  fromKey: string,
+  toKey: string,
+  seen?: WeakSet<object>
+): any => {
+  if (obj === null || typeof obj !== "object") return obj;
+  if (isSkippableObject(obj)) return obj;
+  const seenSet = seen || new WeakSet<object>();
+  if (seenSet.has(obj as object)) return obj;
+  seenSet.add(obj as object);
+
   if (Array.isArray(obj)) {
-    return obj.map((item) => transformKeys(item, fromKey, toKey));
+    return obj.map((item) => transformKeys(item, fromKey, toKey, seenSet));
   }
+  if (!isPlainObject(obj)) return obj;
+
   const newObj: any = {};
-  for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      const newKey = key === fromKey ? toKey : key;
-      newObj[newKey] = transformKeys(obj[key], fromKey, toKey);
-    }
+  for (const key of Object.keys(obj)) {
+    const newKey = key === fromKey ? toKey : key;
+    newObj[newKey] = transformKeys((obj as any)[key], fromKey, toKey, seenSet);
   }
   return newObj;
 };
@@ -53,22 +78,31 @@ api.interceptors.request.use((config) => {
       config.method === "put" ||
       config.method === "patch")
   ) {
-    config.data = transformKeys(config.data, "id", "_id");
+    if (isPlainObject(config.data) || Array.isArray(config.data)) {
+      config.data = transformKeys(config.data, "id", "_id");
+    }
   }
-  // Special handling for URL params if necessary, though backend uses :fileId/:folderId
   return config;
 });
 
 // Response interceptor to transform '_id' to 'id' for incoming data
 api.interceptors.response.use(
   (response) => {
-    if (response.data) {
+    if (
+      response &&
+      response.data &&
+      (isPlainObject(response.data) || Array.isArray(response.data))
+    ) {
       response.data = transformKeys(response.data, "_id", "id");
     }
     return response;
   },
   (error) => {
-    if (error.response && error.response.data) {
+    if (
+      error &&
+      error.response &&
+      (isPlainObject(error.response.data) || Array.isArray(error.response.data))
+    ) {
       error.response.data = transformKeys(error.response.data, "_id", "id");
     }
     return Promise.reject(error);
@@ -100,22 +134,40 @@ export const fileApi = {
   }) => {
     return api.get(`/files/search`, { params });
   },
+  initUpload: (params: {
+    fileName?: string;
+    fileSize?: number;
+    folderId?: string;
+  }) => {
+    return api.post(`/files/upload/init`, params);
+  },
   uploadFile: (
     file: File,
     currentPath: string[],
-    folderId: string | undefined, // New parameter
-    onUploadProgress?: (progressEvent: any) => void
+    folderId: string | undefined,
+    uploadId: string,
+    opts?: { fileName?: string; fileSize?: number }
   ) => {
     const formData = new FormData();
-    formData.append("file", file);
+    // identifiers/metadata as headers; do not include uploadId in the form body
     formData.append("path", currentPath.join("/"));
     if (folderId) {
       formData.append("folderId", folderId);
     }
+    if (opts?.fileName) formData.append("fileName", opts.fileName);
+    if (typeof opts?.fileSize === "number")
+      formData.append("fileSize", String(opts.fileSize));
+    // Append the file with explicit name
+    formData.append("file", file, file.name);
 
     return api.post("/files/upload", formData, {
-      // Let the browser set the Content-Type with proper boundary for FormData
-      onUploadProgress,
+      headers: {
+        "x-upload-id": uploadId,
+        ...(typeof opts?.fileSize === "number"
+          ? { "x-file-size": String(opts.fileSize) }
+          : {}),
+      },
+      transformRequest: [(data) => data],
     });
   },
   getFile: (fileId: string) => {
@@ -194,6 +246,26 @@ export const folderApi = {
   getFolderBreadcrumb: (folderId: string) => {
     return api.get(`/folders/${folderId}/breadcrumb`);
   },
+  getRootContents: (params?: { page?: number; limit?: number }) => {
+    return api.get(`/folders/root/contents`, { params });
+  },
+  unifiedSearch: (params: {
+    q?: string;
+    name?: string;
+    description?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    folderId?: string | null; // use null literal for root
+    page?: number;
+    limit?: number;
+  }) => {
+    const searchParams: any = { ...params };
+    if (typeof params.folderId !== "undefined") {
+      searchParams.folderId =
+        params.folderId === null ? "null" : params.folderId;
+    }
+    return api.get(`/folders/search`, { params: searchParams });
+  },
   getFilteredFolderContents: (
     folderId: string,
     params?: {
@@ -224,5 +296,47 @@ export const sseApi = {
   },
   getFolderUpdates: (folderId: string) => {
     return new EventSource(`${API_BASE_URL}/sse/folder-updates/${folderId}`);
+  },
+  openUploadProgress: (
+    uploadId: string,
+    handlers?: {
+      onConnected?: () => void;
+      onPing?: () => void;
+      onMessage?: (data: any) => void;
+      onError?: (error: any) => void;
+    }
+  ) => {
+    const es = new EventSource(
+      `${API_BASE_URL}/sse/upload-progress/${uploadId}`
+    );
+    if (handlers?.onConnected)
+      es.addEventListener("connected", handlers.onConnected as any);
+    if (handlers?.onPing) es.addEventListener("ping", handlers.onPing as any);
+    if (handlers?.onMessage)
+      es.onmessage = (evt) => {
+        try {
+          const parsed = JSON.parse(evt.data);
+          handlers.onMessage?.(parsed);
+        } catch {
+          // ignore parse errors
+        }
+      };
+    if (handlers?.onError)
+      es.onerror = (e) => {
+        handlers.onError?.(e);
+      };
+    return es;
+  },
+  debugUploadProgress: (uploadId: string) => {
+    const es = new EventSource(
+      `${API_BASE_URL}/sse/upload-progress/${uploadId}`
+    );
+    es.addEventListener("connected", () =>
+      console.log("[SSE connected]", uploadId)
+    );
+    es.addEventListener("ping", () => console.log("[SSE ping]", uploadId));
+    es.onmessage = (evt) => console.log("[SSE message]", uploadId, evt.data);
+    es.onerror = (e) => console.warn("[SSE error]", uploadId, e);
+    return es;
   },
 };

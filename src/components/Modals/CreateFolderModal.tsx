@@ -30,13 +30,17 @@ export function CreateFolderModal({
   const [folderName, setFolderName] = useState("");
   const [description, setDescription] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-  const { state, dispatch, fetchFiles, fetchFolderTree } = useFileManager(); // Add fetchFiles and fetchFolderTree
+  const { state, dispatch, fetchFiles, fetchFolderTree, revalidateQuietly } =
+    useFileManager();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     console.log("CreateFolderModal - parentFolderId:", parentFolderId);
-    console.log("CreateFolderModal - parentFolderCurrentPath:", parentFolderCurrentPath);
+    console.log(
+      "CreateFolderModal - parentFolderCurrentPath:",
+      parentFolderCurrentPath
+    );
 
     const validationError = validateFileName(folderName);
     if (validationError) {
@@ -56,10 +60,10 @@ export function CreateFolderModal({
         folderName,
         description: description.trim(),
         path: [...parentFolderCurrentPath, folderName].filter(Boolean),
-        parentId: parentFolderId ?? undefined
+        parentId: parentFolderId ?? undefined,
       });
-      
-      await folderApi.createFolder(
+
+      const resp = await folderApi.createFolder(
         folderName,
         description.trim(),
         // Pass the new folder's path as an array; the API will join it and add the trailing slash
@@ -72,9 +76,38 @@ export function CreateFolderModal({
         description: `"${folderName}" has been created successfully.`,
       });
 
-      // Re-fetch files and folder tree to update the UI
-      fetchFiles();
-      fetchFolderTree(); // Re-fetch folder tree
+      // Optimistic update of current view and tree
+      const folder = (resp as any)?.data ?? {
+        id: crypto.randomUUID?.() || `${Date.now()}`,
+        name: folderName,
+        description: description.trim(),
+        type: "folder" as const,
+        parentId: parentFolderId ?? null,
+        createdAt: new Date().toISOString(),
+        modifiedAt: new Date().toISOString(),
+      };
+      const child = { ...folder, type: "folder" } as any;
+      // Update main inline expansion cache
+      // Note: null parent implies root list
+      dispatch({
+        type: "OPTIMISTIC_ADD_CHILD",
+        payload: { parentId: parentFolderId, child },
+      });
+      // Update left tree
+      dispatch({
+        type: "OPTIMISTIC_ADD_TREE_CHILD",
+        payload: { parentId: parentFolderId, child },
+      });
+      // Adjust badge counts on parent: +1 folder
+      if (parentFolderId) {
+        dispatch({
+          type: "ADJUST_FOLDER_COUNTS",
+          payload: { folderId: parentFolderId, deltaFolders: 1 },
+        });
+      }
+
+      // Quiet revalidation to sync counts/tree without collapsing UI
+      revalidateQuietly(parentFolderId ?? null);
 
       // Reset form and close modal
       setFolderName("");

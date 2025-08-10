@@ -22,14 +22,16 @@ interface AdvancedFilterProps {
     dateTo: Date | undefined;
   }) => void;
   onClearFilters: () => void;
+  onAfterChange?: () => void;
 }
 
 export function AdvancedFilter({
   onApplyFilters,
   onClearFilters,
+  onAfterChange,
 }: AdvancedFilterProps) {
   const { state } = useFileManager();
-  const [nameFilter, setNameFilter] = useState(state.filterByName || "");
+  const [nameFilter, setNameFilter] = useState("");
   const [descriptionFilter, setDescriptionFilter] = useState(
     state.filterByDescription || ""
   );
@@ -47,6 +49,7 @@ export function AdvancedFilter({
       dateFrom: dateFromFilter,
       dateTo: dateToFilter,
     });
+    onAfterChange?.();
   };
 
   const handleClear = () => {
@@ -55,6 +58,7 @@ export function AdvancedFilter({
     setDateFromFilter(undefined);
     setDateToFilter(undefined);
     onClearFilters();
+    onAfterChange?.();
   };
 
   return (

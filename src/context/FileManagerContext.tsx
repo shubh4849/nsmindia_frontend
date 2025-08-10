@@ -58,7 +58,6 @@ interface FileManagerState {
   totalFiles: number; // For pagination
   totalFolders: number; // New: total folder count
   totalDocuments: number; // New: total document count
-  filterByName: string; // New: filter by name
   filterByDescription: string; // New: filter by description
   filterDateFrom: Date | undefined; // New: filter date from
   filterDateTo: Date | undefined; // New: filter date to
@@ -140,7 +139,27 @@ type FileManagerAction =
       payload: { parentId: string; children: FileItem[] };
     }
   | { type: "SET_SELECTED_MAIN_FOLDER"; payload: string | null }
-  | { type: "CLEAR_MAIN_EXPANSIONS" };
+  | { type: "CLEAR_MAIN_EXPANSIONS" }
+  | {
+      type: "OPTIMISTIC_ADD_CHILD";
+      payload: { parentId: string | null; child: FileItem };
+    }
+  | {
+      type: "OPTIMISTIC_ADD_TREE_CHILD";
+      payload: { parentId: string | null; child: FileItem };
+    }
+  | {
+      type: "OPTIMISTIC_REMOVE_CHILD";
+      payload: { parentId: string | null; id: string };
+    }
+  | {
+      type: "OPTIMISTIC_REMOVE_TREE_CHILD";
+      payload: { parentId: string | null; id: string };
+    }
+  | {
+      type: "ADJUST_FOLDER_COUNTS";
+      payload: { folderId: string; deltaFolders?: number; deltaFiles?: number };
+    };
 
 const initialState: FileManagerState = {
   currentPath: ["Root"],
@@ -152,7 +171,7 @@ const initialState: FileManagerState = {
   isLeftPanelOpen: true,
   currentPage: 1,
   itemsPerPage: 10,
-  sortBy: "name",
+  sortBy: "date",
   sortOrder: "asc",
   expandedFolders: new Set(["root"]),
   isCreateFolderModalOpen: false,
@@ -163,7 +182,6 @@ const initialState: FileManagerState = {
   totalFiles: 0,
   totalFolders: 0, // Initialize to 0
   totalDocuments: 0, // Initialize to 0
-  filterByName: "", // Initialize to empty string
   filterByDescription: "", // Initialize to empty string
   filterDateFrom: undefined, // Initialize to undefined
   filterDateTo: undefined, // Initialize to undefined
@@ -276,7 +294,6 @@ function fileManagerReducer(
     case "SET_FILTERS":
       return {
         ...state,
-        filterByName: action.payload.name,
         filterByDescription: action.payload.description,
         filterDateFrom: action.payload.dateFrom,
         filterDateTo: action.payload.dateTo,
@@ -307,6 +324,112 @@ function fileManagerReducer(
       const next = { ...state.mainChildrenByParent };
       next[action.payload.parentId] = action.payload.children;
       return { ...state, mainChildrenByParent: next };
+    }
+    case "OPTIMISTIC_ADD_CHILD": {
+      const { parentId, child } = action.payload;
+      const next = { ...state.mainChildrenByParent };
+      const key = parentId ?? "__root__";
+      const existing = next[key] || [];
+      next[key] = [...existing, child];
+      // If adding at root level and child is folder, also reflect in rootFoldersWithCounts
+      let rootFoldersWithCounts = state.rootFoldersWithCounts;
+      if (!parentId && child.type === "folder") {
+        rootFoldersWithCounts = [
+          ...state.rootFoldersWithCounts,
+          { ...(child as any), totalChildFolders: 0, totalChildFiles: 0 },
+        ];
+      }
+      return { ...state, mainChildrenByParent: next, rootFoldersWithCounts };
+    }
+    case "OPTIMISTIC_ADD_TREE_CHILD": {
+      const { parentId, child } = action.payload;
+      const addToTree = (nodes: FileItem[]): FileItem[] =>
+        nodes.map((n) => {
+          if (n.id === parentId) {
+            const kids = n.children || [];
+            return { ...n, children: [...kids, child] };
+          }
+          if (n.children && n.children.length > 0) {
+            return { ...n, children: addToTree(n.children) };
+          }
+          return n;
+        });
+      // If parentId is null, push at top level as folder
+      const updatedTree = parentId
+        ? addToTree(state.folderTree)
+        : [...state.folderTree, child];
+      return { ...state, folderTree: updatedTree };
+    }
+    case "OPTIMISTIC_REMOVE_CHILD": {
+      const { parentId, id } = action.payload;
+      const next = { ...state.mainChildrenByParent };
+      const key = parentId ?? "__root__";
+      next[key] = (next[key] || []).filter((c) => c.id !== id);
+      let rootFoldersWithCounts = state.rootFoldersWithCounts;
+      if (!parentId) {
+        rootFoldersWithCounts = state.rootFoldersWithCounts.filter(
+          (f) => f.id !== id
+        );
+      }
+      return { ...state, mainChildrenByParent: next, rootFoldersWithCounts };
+    }
+    case "OPTIMISTIC_REMOVE_TREE_CHILD": {
+      const { parentId, id } = action.payload;
+      const removeFromTree = (nodes: FileItem[]): FileItem[] =>
+        nodes
+          .map((n) => {
+            if (n.children && n.children.length > 0) {
+              const filtered = n.children.filter((c) => c.id !== id);
+              return { ...n, children: removeFromTree(filtered) };
+            }
+            return n;
+          })
+          .filter((n) => n.id !== id);
+      const newTree = removeFromTree(state.folderTree);
+      return { ...state, folderTree: newTree };
+    }
+    case "ADJUST_FOLDER_COUNTS": {
+      const { folderId, deltaFolders = 0, deltaFiles = 0 } = action.payload;
+      // Update root list entries
+      const updatedRoot = state.rootFoldersWithCounts.map((f) =>
+        f.id === folderId
+          ? {
+              ...f,
+              totalChildFolders: Math.max(
+                0,
+                ((f as any).totalChildFolders ?? 0) + deltaFolders
+              ),
+              totalChildFiles: Math.max(
+                0,
+                ((f as any).totalChildFiles ?? 0) + deltaFiles
+              ),
+            }
+          : f
+      );
+      // Update any folder item inside mainChildrenByParent
+      const updatedChildren: Record<string, FileItem[]> = {};
+      for (const [pid, list] of Object.entries(state.mainChildrenByParent)) {
+        updatedChildren[pid] = (list || []).map((it: any) =>
+          it.id === folderId && it.type === "folder"
+            ? {
+                ...it,
+                totalChildFolders: Math.max(
+                  0,
+                  (it.totalChildFolders ?? 0) + deltaFolders
+                ),
+                totalChildFiles: Math.max(
+                  0,
+                  (it.totalChildFiles ?? 0) + deltaFiles
+                ),
+              }
+            : it
+        );
+      }
+      return {
+        ...state,
+        rootFoldersWithCounts: updatedRoot,
+        mainChildrenByParent: updatedChildren,
+      };
     }
     case "SET_SELECTED_MAIN_FOLDER":
       return { ...state, selectedMainFolderId: action.payload };
@@ -354,6 +477,28 @@ interface FileManagerContextType {
   clearFilters: () => void;
   setBreadcrumbPath: (segments: string[]) => void;
   clearMainExploration: () => void;
+  // Optimistic helpers
+  optimisticAddChild: (parentId: string | null, child: FileItem) => void;
+  optimisticAddTreeChild: (parentId: string | null, child: FileItem) => void;
+  revalidateQuietly: (parentId: string | null) => void;
+  optimisticRemoveChild: (parentId: string | null, id: string) => void;
+  optimisticRemoveTreeChild: (parentId: string | null, id: string) => void;
+  adjustFolderCounts: (
+    folderId: string,
+    deltaFolders?: number,
+    deltaFiles?: number
+  ) => void;
+  revealFolderInMain: (folderId: string) => Promise<void>;
+  runUnifiedSearch: (params: {
+    q?: string;
+    name?: string;
+    description?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    folderId?: string | null;
+    page?: number;
+    limit?: number;
+  }) => Promise<void>;
 }
 
 const FileManagerContext = createContext<FileManagerContextType | undefined>(
@@ -364,6 +509,7 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(fileManagerReducer, initialState);
   const uploadEventSourcesRef = useRef<Map<string, EventSource>>(new Map());
   const folderEventSourceRef = useRef<EventSource | null>(null);
+  const revalidateTimersRef = useRef<Map<string, number>>(new Map());
 
   // Helper to check if a value is a valid MongoDB ObjectId (24 hex characters)
   const isValidObjectId = useCallback((value: unknown): value is string => {
@@ -400,31 +546,83 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
   const addUpload = useCallback((upload: UploadProgress) => {
     dispatch({ type: "ADD_UPLOAD", payload: upload });
 
+    console.log("[SSE upload start] opening EventSource for", upload.id);
     const eventSource = sseApi.getUploadProgress(upload.id);
     uploadEventSourcesRef.current.set(upload.id, eventSource);
 
+    // Log on open
+    eventSource.onopen = () => {
+      console.log("[SSE upload open]", upload.id);
+    };
+
+    // Also attach generic message listener in addition to onmessage
+    eventSource.addEventListener("message", (event: MessageEvent) => {
+      try {
+        const data = JSON.parse((event as any).data);
+        console.log("[SSE upload message(event)]", upload.id, data);
+      } catch {}
+    });
+
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      console.log("[SSE upload message]", upload.id, data);
       dispatch({
         type: "UPDATE_UPLOAD",
         payload: {
           id: upload.id,
           progress: data.progress,
-          status: data.status,
+          status: data.status === "failed" ? "error" : data.status,
         },
       });
-      if (data.status === "completed" || data.status === "failed") {
+      const terminal = data.status === "completed" || data.status === "failed";
+      if (terminal) {
         eventSource.close();
         uploadEventSourcesRef.current.delete(upload.id);
       }
     };
 
-    eventSource.onerror = (error) => {
-      console.error("SSE Error for upload", upload.id, error);
+    // Handle timeout event explicitly
+    eventSource.addEventListener("timeout", (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data || "{}");
+        console.warn("[SSE upload timeout]", upload.id, data);
+        // Do NOT mark as error; backend keeps the stream open for late updates
+        // Maintain uploading state and optionally set progress to last known or 0
+        dispatch({
+          type: "UPDATE_UPLOAD",
+          payload: {
+            id: upload.id,
+            progress: typeof data.progress === "number" ? data.progress : 0,
+            status: "uploading",
+          },
+        });
+      } catch {
+        console.warn("[SSE upload timeout parse error]", upload.id);
+        dispatch({
+          type: "UPDATE_UPLOAD",
+          payload: { id: upload.id, progress: 0, status: "uploading" },
+        });
+      }
+      // Intentionally keep the EventSource open for late updates
+    });
+
+    // Optional: honor connected and ping events for UI stability
+    eventSource.addEventListener("connected", () => {
+      console.log("[SSE upload connected]", upload.id);
+      // Ensure an initial 0% entry is visible
       dispatch({
         type: "UPDATE_UPLOAD",
-        payload: { id: upload.id, progress: 0, status: "error" },
+        payload: { id: upload.id, progress: 0, status: "uploading" },
       });
+    });
+    eventSource.addEventListener("ping", () => {
+      console.log("[SSE upload ping]", upload.id);
+      // Heartbeat received; no state change required
+    });
+
+    eventSource.onerror = (error) => {
+      console.warn("SSE closed or errored for upload", upload.id, error);
+      // Keep local status; do not force error here since completion may still succeed
       eventSource.close();
       uploadEventSourcesRef.current.delete(upload.id);
     };
@@ -441,11 +639,21 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     try {
       const response = await folderApi.getFolderTree();
       console.log("Raw folder tree response data:", response.data);
-      const rootFolder = response.data.find(
-        (f: FileItem) => f.parentId === null
-      );
+      const raw = response.data as any;
+      const tree: FileItem[] = Array.isArray(raw)
+        ? raw
+        : raw?.results || raw?.tree || raw?.folders || raw?.data || [];
+
+      const rootFolder = Array.isArray(tree)
+        ? tree.find(
+            (f: any) => f && (f.parentId === null || f.parentId === undefined)
+          )
+        : null;
       if (rootFolder) {
-        dispatch({ type: "SET_ROOT_FOLDER_ID", payload: rootFolder.id });
+        dispatch({
+          type: "SET_ROOT_FOLDER_ID",
+          payload: (rootFolder as any).id,
+        });
         // Do not set currentFolderId here; homepage should remain root list until user navigates
         if (state.currentFolderId === null) {
           dispatch({ type: "SET_CURRENT_PATH", payload: ["Root"] });
@@ -457,7 +665,7 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "SET_CURRENT_PATH", payload: ["Root"] });
         }
       }
-      dispatch({ type: "SET_FOLDER_TREE", payload: response.data });
+      dispatch({ type: "SET_FOLDER_TREE", payload: tree });
     } catch (error) {
       console.error("Error fetching folder tree:", error);
       dispatch({ type: "SET_FOLDER_TREE", payload: [] });
@@ -496,34 +704,52 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
       } else {
         // If currentFolderId is null (homepage/root), fetch root folders with counts.
         if (state.currentFolderId === null) {
-          console.log("Fetching root folders for main content area...");
-          const rootFoldersResponse = await folderApi.getFolders({
-            parentId: null,
+          console.log(
+            "Fetching root contents (folders + files) for main content area..."
+          );
+          const rootContents = await folderApi.getRootContents({
             page: state.currentPage,
             limit: state.itemsPerPage,
-            includeChildCounts: true,
           });
 
-          const foldersWithCounts: FolderItemWithCounts[] = (
-            rootFoldersResponse.data.results || []
-          ).map((folder: any) => ({
-            ...folder,
-            type: "folder",
-            totalChildFolders: folder.counts?.childFolders ?? 0,
-            totalChildFiles: folder.counts?.childFiles ?? 0,
-          }));
+          // Enrich folders with direct child counts (like other views)
+          const foldersRaw = rootContents.data.folders || [];
+          const foldersWithCounts: FolderItemWithCounts[] = await Promise.all(
+            foldersRaw.map(async (f: any) => {
+              try {
+                const [cf, cfi] = await Promise.all([
+                  folderApi.getDirectChildFoldersCount(f.id || f._id),
+                  folderApi.getDirectChildFilesCount(f.id || f._id),
+                ]);
+                return {
+                  ...(f as any),
+                  id: f.id || f._id,
+                  type: "folder",
+                  totalChildFolders: cf.data.count ?? 0,
+                  totalChildFiles: cfi.data.count ?? 0,
+                } as FolderItemWithCounts;
+              } catch {
+                return {
+                  ...(f as any),
+                  id: f.id || f._id,
+                  type: "folder",
+                  totalChildFolders: 0,
+                  totalChildFiles: 0,
+                } as FolderItemWithCounts;
+              }
+            })
+          );
 
           dispatch({
             type: "SET_FILES_AND_TOTAL",
             payload: {
-              files: foldersWithCounts,
+              files: foldersWithCounts as unknown as FileItem[],
               total:
-                rootFoldersResponse.data.totalResults ||
+                rootContents.data.pagination?.totalFolders ||
                 foldersWithCounts.length,
             },
           });
           dispatch({ type: "SET_ROOT_FOLDERS", payload: foldersWithCounts });
-          console.log("Dispatched SET_ROOT_FOLDERS with:", foldersWithCounts);
         } else if (isValidObjectId(state.currentFolderId)) {
           // If currentFolderId is set, fetch contents of that specific folder.
           console.log(
@@ -593,11 +819,6 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     // This function will now apply client-side filtering based on advanced filters
     let filtered = state.files;
 
-    if (state.filterByName) {
-      filtered = filtered.filter((file) =>
-        file.name.toLowerCase().includes(state.filterByName.toLowerCase())
-      );
-    }
     if (state.filterByDescription) {
       filtered = filtered.filter((file) =>
         file.description
@@ -618,7 +839,6 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     return filtered;
   }, [
     state.files,
-    state.filterByName,
     state.filterByDescription,
     state.filterDateFrom,
     state.filterDateTo,
@@ -902,6 +1122,143 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     }
   }, [state.currentPage, state.itemsPerPage]);
 
+  // Debounced subtle revalidation that preserves UI state
+  const scheduleRevalidate = useCallback(
+    (parentId: string | null) => {
+      const key = parentId ?? "__root__";
+      const existing = revalidateTimersRef.current.get(key);
+      if (existing) window.clearTimeout(existing);
+      const timer = window.setTimeout(async () => {
+        try {
+          if (parentId) {
+            await fetchMainChildren(parentId);
+          } else {
+            await fetchRootFolders();
+          }
+          await fetchCounts();
+          await fetchFolderTree();
+        } catch (e) {
+          console.warn("Quiet revalidation failed", e);
+        } finally {
+          revalidateTimersRef.current.delete(key);
+        }
+      }, 1500);
+      revalidateTimersRef.current.set(key, timer);
+    },
+    [fetchMainChildren, fetchRootFolders, fetchCounts, fetchFolderTree]
+  );
+
+  // Find path of folder ids from root to target
+  const findPathIds = useCallback(
+    (targetId: string): string[] | null => {
+      const dfs = (nodes: FileItem[], acc: string[]): string[] | null => {
+        for (const n of nodes) {
+          const next = [...acc, n.id];
+          if (n.id === targetId) return next;
+          if (n.children && n.children.length > 0) {
+            const found = dfs(n.children, next);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      return dfs(state.folderTree || [], []);
+    },
+    [state.folderTree]
+  );
+
+  // Expand all ancestors along the path and fetch their children so the chain is visible
+  const revealFolderInMain = useCallback(
+    async (folderId: string) => {
+      const pathIds = findPathIds(folderId);
+      if (!pathIds || pathIds.length === 0) return;
+      // Expand each id in order; fetch children to populate the next level
+      for (const id of pathIds) {
+        // If not expanded yet, toggle open
+        if (!state.mainExpandedIds.has(id)) {
+          dispatch({ type: "TOGGLE_MAIN_EXPAND", payload: id });
+        }
+        try {
+          await fetchMainChildren(id);
+        } catch {}
+      }
+      // Update breadcrumb path using names from tree
+      const namesFromTree = (() => {
+        const names: string[] = ["Root"];
+        const collect = (
+          nodes: FileItem[],
+          ids: string[],
+          idx: number
+        ): boolean => {
+          for (const n of nodes) {
+            if (n.id === ids[idx]) {
+              names.push(n.name);
+              if (idx === ids.length - 1) return true;
+              return collect(n.children || [], ids, idx + 1);
+            }
+            if (n.children && n.children.length > 0) {
+              const ok = collect(n.children, ids, idx);
+              if (ok) return true;
+            }
+          }
+          return false;
+        };
+        collect(state.folderTree || [], pathIds, 0);
+        return names;
+      })();
+      dispatch({ type: "SET_CURRENT_PATH", payload: namesFromTree });
+    },
+    [
+      dispatch,
+      state.folderTree,
+      state.mainExpandedIds,
+      fetchMainChildren,
+      findPathIds,
+    ]
+  );
+
+  // Unified search using backend endpoint, then reveal any nested folder results
+  const runUnifiedSearch = useCallback(
+    async (params: {
+      q?: string;
+      name?: string;
+      description?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      folderId?: string | null;
+      page?: number;
+      limit?: number;
+    }) => {
+      const res = await folderApi.unifiedSearch(params);
+      const folders = (res.data.folders || []).map(
+        (f: any) => ({ ...f, id: f.id || f._id, type: "folder" } as FileItem)
+      );
+      const files = (res.data.files || []).map(
+        (f: any) => ({ ...f, id: f.id || f._id, type: "file" } as FileItem)
+      );
+      const combined = [...folders, ...files];
+      dispatch({
+        type: "SET_FILES_AND_TOTAL",
+        payload: { files: combined, total: combined.length },
+      });
+      // Reveal all folder paths returned (best effort)
+      for (const f of folders) {
+        await revealFolderInMain(f.id);
+      }
+      // Reveal parent paths for files as well
+      for (const file of files) {
+        const parentId = (file as any).folderId;
+        if (
+          typeof parentId === "string" &&
+          /^[0-9a-fA-F]{24}$/.test(parentId)
+        ) {
+          await revealFolderInMain(parentId);
+        }
+      }
+    },
+    [dispatch, revealFolderInMain]
+  );
+
   useEffect(() => {
     // Initial data fetch on component mount
     fetchFolderTree();
@@ -928,17 +1285,25 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
       const eventSource = sseApi.getFolderUpdates(state.currentFolderId);
       folderEventSourceRef.current = eventSource;
 
+      // Some servers use named events. Listen to both default and named
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
         console.log("SSE Folder Update:", data);
-        // Depending on the update type, you might re-fetch files or update a specific item
-        fetchFiles(); // Re-fetch files to reflect changes
-        fetchFolderTree(); // Re-fetch folder tree to reflect folder structure changes
+        fetchFiles();
+        fetchFolderTree();
       };
+
+      eventSource.addEventListener("folderUpdate", (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("SSE folderUpdate:", data);
+        } catch {}
+        fetchFiles();
+        fetchFolderTree();
+      });
 
       eventSource.onerror = (error) => {
         console.error("SSE Error for folder", state.currentFolderId, error);
-        // Optionally, dispatch an error state or show a toast
         if (folderEventSourceRef.current) {
           folderEventSourceRef.current.close();
           folderEventSourceRef.current = null;
@@ -992,6 +1357,39 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
         applyFilters,
         clearFilters,
         clearMainExploration: () => dispatch({ type: "CLEAR_MAIN_EXPANSIONS" }),
+        revalidateQuietly: scheduleRevalidate,
+        revealFolderInMain,
+        runUnifiedSearch,
+        // Optimistic helpers
+        optimisticAddChild: (parentId: string | null, child: FileItem) =>
+          dispatch({
+            type: "OPTIMISTIC_ADD_CHILD",
+            payload: { parentId, child },
+          }),
+        optimisticAddTreeChild: (parentId: string | null, child: FileItem) =>
+          dispatch({
+            type: "OPTIMISTIC_ADD_TREE_CHILD",
+            payload: { parentId, child },
+          }),
+        optimisticRemoveChild: (parentId: string | null, id: string) =>
+          dispatch({
+            type: "OPTIMISTIC_REMOVE_CHILD",
+            payload: { parentId, id },
+          }),
+        optimisticRemoveTreeChild: (parentId: string | null, id: string) =>
+          dispatch({
+            type: "OPTIMISTIC_REMOVE_TREE_CHILD",
+            payload: { parentId, id },
+          }),
+        adjustFolderCounts: (
+          folderId: string,
+          deltaFolders = 0,
+          deltaFiles = 0
+        ) =>
+          dispatch({
+            type: "ADJUST_FOLDER_COUNTS",
+            payload: { folderId, deltaFolders, deltaFiles },
+          }),
       }}
     >
       {children}

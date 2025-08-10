@@ -32,6 +32,7 @@ export function FileList() {
     openUploadFileModal,
     setBreadcrumbPath,
     clearMainExploration,
+    dispatch,
   } = useFileManager();
   const {
     selectedFile,
@@ -117,12 +118,46 @@ export function FileList() {
     setIsEditModalOpen(true);
   };
 
-  const handleDelete = async (fileId: string, type: "file" | "folder") => {
+  const handleDelete = async (
+    fileId: string,
+    type: "file" | "folder",
+    parentId: string | null
+  ) => {
+    const ok = window.confirm(
+      `Are you sure you want to delete this ${
+        type === "file" ? "file" : "folder"
+      }?`
+    );
+    if (!ok) return;
+
+    // Use explicit parentId context for optimistic removal
+    const currentParentId = parentId;
+    // Optimistic remove from main and tree
+    (dispatch as any)({
+      type: "OPTIMISTIC_REMOVE_CHILD",
+      payload: { parentId: currentParentId, id: fileId },
+    });
+    (dispatch as any)({
+      type: "OPTIMISTIC_REMOVE_TREE_CHILD",
+      payload: { parentId: currentParentId, id: fileId },
+    });
+    // Adjust parent badge counts
+    if (currentParentId) {
+      (dispatch as any)({
+        type: "ADJUST_FOLDER_COUNTS",
+        payload: {
+          folderId: currentParentId,
+          deltaFolders: type === "folder" ? -1 : 0,
+          deltaFiles: type === "file" ? -1 : 0,
+        },
+      });
+    }
+
     try {
       if (type === "file") {
         await fileApi.deleteFile(fileId);
       } else {
-        await folderApi.deleteFolder(fileId); // Now calling the backend API
+        await folderApi.deleteFolder(fileId);
       }
       toast({
         title: "Deleted successfully",
@@ -130,8 +165,8 @@ export function FileList() {
           type === "file" ? "File" : "Folder"
         } deleted successfully.`,
       });
-      fetchFiles(); // Refresh the list
-      fetchFolderTree(); // Refresh the folder tree after deletion
+      // Quietly revalidate to reconcile any counts
+      (state as any).revalidateQuietly?.(currentParentId);
     } catch (error) {
       console.error("Error deleting item:", error);
       toast({
@@ -139,6 +174,8 @@ export function FileList() {
         description: `Failed to delete ${type === "file" ? "file" : "folder"}.`,
         variant: "destructive",
       });
+      // Fall back to revalidation to restore accurate view
+      (state as any).revalidateQuietly?.(currentParentId);
     }
   };
 
@@ -262,7 +299,7 @@ export function FileList() {
                 className="h-8 w-8 p-0 text-destructive hover:bg-surface-hover"
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleDelete(child.id, "file");
+                  handleDelete(child.id, "file", parentId);
                 }}
                 aria-label="Delete file"
                 title="Delete"
@@ -320,7 +357,7 @@ export function FileList() {
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="cursor-pointer hover:bg-surface-hover text-destructive focus:text-destructive"
-                    onClick={() => handleDelete(child.id, "folder")}
+                    onClick={() => handleDelete(child.id, "folder", parentId)}
                   >
                     Delete
                   </DropdownMenuItem>
@@ -486,7 +523,7 @@ export function FileList() {
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuItem
-                      onClick={() => handleDelete(item.id, item.type)}
+                      onClick={() => handleDelete(item.id, item.type, null)}
                       className="cursor-pointer hover:bg-surface-hover text-destructive focus:text-destructive"
                     >
                       Delete
@@ -502,7 +539,7 @@ export function FileList() {
                     className="h-8 w-8 p-0 text-destructive hover:bg-surface-hover"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDelete(item.id, "file");
+                      handleDelete(item.id, "file", null);
                     }}
                     aria-label="Delete file"
                     title="Delete"

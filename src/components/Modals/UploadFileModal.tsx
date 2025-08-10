@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { Upload, X, File, AlertCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -27,6 +27,7 @@ interface PendingFile {
   id: string;
   status: "pending" | "uploading" | "completed" | "error";
   progress: number;
+  serverUploadId?: string;
 }
 
 // Allowed MIME types
@@ -49,7 +50,8 @@ const DOCUMENT_TYPES = [
   "text/plain",
   "text/csv",
 ];
-const ACCEPTED_TYPES = [...IMAGE_TYPES, ...DOCUMENT_TYPES];
+const VIDEO_TYPES = ["video/mp4"];
+const ACCEPTED_TYPES = [...IMAGE_TYPES, ...DOCUMENT_TYPES, ...VIDEO_TYPES];
 const ACCEPT_MAP: Record<string, string[]> = ACCEPTED_TYPES.reduce(
   (acc, type) => {
     acc[type] = [];
@@ -66,15 +68,8 @@ export function UploadFileModal({
 }: UploadFileModalProps) {
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
-  const {
-    addUpload,
-    updateUpload,
-    dispatch,
-    state,
-    fetchFiles,
-    fetchFolderTree,
-  } = useFileManager();
-  const { currentPath } = state;
+  const { addUpload, dispatch, state, revalidateQuietly } = useFileManager();
+  // no-op
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const whitelist = new Set(ACCEPTED_TYPES);
@@ -126,54 +121,97 @@ export function UploadFileModal({
     setPendingFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
-  const uploadFile = async (pendingFile: PendingFile) => {
+  const uploadFile = async (pendingFile: PendingFile): Promise<boolean> => {
     const { file, id } = pendingFile;
 
     setPendingFiles((prev) =>
       prev.map((f) => (f.id === id ? { ...f, status: "uploading" } : f))
     );
 
-    // Before calling API, prepare to add upload to context for tracking
-    // Note: The `id` passed to `addUpload` should ideally be the `uploadId` returned from the backend.
-    // For now, we use the client-generated ID and will update it once the backend response is received.
-    addUpload({
-      id,
-      fileName: file.name,
-      progress: 0,
-      status: "uploading",
-    });
-
     try {
-      const response = await fileApi.uploadFile(
-        file,
-        parentFolderCurrentPath, // Use parentFolderCurrentPath
-        parentFolderId || undefined, // Pass parentFolderId
-        ((progressEvent: any) => {
-          const percentCompleted = Math.round(
-            (progressEvent.loaded * 100) / (progressEvent.total || 1)
-          );
-          setPendingFiles((prev) =>
-            prev.map((f) =>
-              f.id === id ? { ...f, progress: percentCompleted } : f
-            )
-          );
-          updateUpload(id, percentCompleted, "uploading");
-        }) as any // Explicitly cast to any to satisfy linter for now
+      // 1) Init upload to get server-owned uploadId
+      const initRes = await fileApi.initUpload({
+        fileName: file.name,
+        fileSize: file.size,
+        folderId: parentFolderId || undefined,
+      });
+      const uploadId = (initRes.data?.uploadId || initRes.data?.id) as string;
+      if (!uploadId) {
+        throw new Error("Failed to initialize upload");
+      }
+
+      // Associate this pending entry with the server uploadId so we can mirror SSE progress in-modal
+      setPendingFiles((prev) =>
+        prev.map((f) => (f.id === id ? { ...f, serverUploadId: uploadId } : f))
       );
 
-      // Update the pending file with completion on the same local id
-      const { uploadId } = response.data; // available if needed later
+      // 2) Start SSE progress tracking for this uploadId via context
+      addUpload({
+        id: uploadId,
+        fileName: file.name,
+        progress: 0,
+        status: "uploading",
+      });
+
+      // 3) Perform the streaming upload; no axios onUploadProgress
+      const response = await fileApi.uploadFile(
+        file,
+        parentFolderCurrentPath,
+        parentFolderId || undefined,
+        uploadId,
+        { fileName: file.name, fileSize: file.size }
+      );
+
+      // Local card completion; SSE will set global upload to completed
       setPendingFiles((prev) =>
         prev.map((f) =>
           f.id === id ? { ...f, status: "completed", progress: 100 } : f
         )
       );
-      updateUpload(id, 100, "completed");
 
-      toast({
-        title: "Upload successful",
-        description: `"${file.name}" has been uploaded successfully.`,
+      if ((response as any)?.data?.status === true) {
+        toast({
+          title: "Upload successful",
+          description: `"${file.name}" has been uploaded successfully.`,
+        });
+      }
+
+      // Optimistic update in lists
+      const createdFile = (response as any).data?.file;
+      const newFile = createdFile || {
+        id: (typeof crypto !== "undefined" && (crypto as any).randomUUID
+          ? (crypto as any).randomUUID()
+          : `${Date.now()}`) as string,
+        name: file.name,
+        originalName: (file as any).name,
+        mimeType: file.type,
+        type: "file" as const,
+        folderId: parentFolderId ?? null,
+        createdAt: new Date().toISOString(),
+        modifiedAt: new Date().toISOString(),
+      };
+      dispatch({
+        type: "OPTIMISTIC_ADD_CHILD",
+        payload: {
+          parentId: parentFolderId,
+          child: { ...newFile, type: "file" } as any,
+        },
       });
+      dispatch({
+        type: "OPTIMISTIC_ADD_TREE_CHILD",
+        payload: {
+          parentId: parentFolderId,
+          child: { ...newFile, type: "file" } as any,
+        },
+      });
+      if (parentFolderId) {
+        dispatch({
+          type: "ADJUST_FOLDER_COUNTS",
+          payload: { folderId: parentFolderId, deltaFiles: 1 },
+        });
+      }
+      revalidateQuietly(parentFolderId ?? null);
+      return (response as any)?.data?.status === true;
     } catch (error: any) {
       console.error("Error uploading file:", error);
       const message =
@@ -183,12 +221,12 @@ export function UploadFileModal({
       setPendingFiles((prev) =>
         prev.map((f) => (f.id === id ? { ...f, status: "error" } : f))
       );
-      updateUpload(id, 0, "error");
       toast({
         title: "Upload failed",
         description: message,
         variant: "destructive",
       });
+      return false;
     }
   };
 
@@ -199,14 +237,14 @@ export function UploadFileModal({
     const filesToUpload = pendingFiles.filter((f) => f.status === "pending");
 
     try {
-      await Promise.all(filesToUpload.map(uploadFile));
-
-      toast({
-        title: "All uploads completed",
-        description: `Successfully uploaded ${filesToUpload.length} file(s)`,
-      });
-      fetchFiles(); // Re-fetch files after upload
-      fetchFolderTree(); // Re-fetch folder tree after upload
+      const results = await Promise.all(filesToUpload.map(uploadFile));
+      if (results.length > 0 && results.every(Boolean)) {
+        toast({
+          title: "All uploads completed",
+          description: `Successfully uploaded ${filesToUpload.length} file(s)`,
+        });
+      }
+      // Do not refetch; we already optimistically updated the UI
       setPendingFiles([]);
       onClose();
     } finally {
@@ -220,6 +258,22 @@ export function UploadFileModal({
       onClose();
     }
   };
+
+  // Mirror SSE-driven progress/status from context into the modal's list items
+  useEffect(() => {
+    setPendingFiles((prev) =>
+      prev.map((f) => {
+        if (!f.serverUploadId) return f;
+        const u = state.uploads.find((x) => x.id === f.serverUploadId);
+        if (!u) return f;
+        return {
+          ...f,
+          progress: Math.round(u.progress ?? 0),
+          status: u.status,
+        } as PendingFile;
+      })
+    );
+  }, [state.uploads]);
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
