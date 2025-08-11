@@ -444,7 +444,7 @@ export function FileList() {
       ) : (
         <div className="border rounded-lg border-border" ref={containerRef}>
           {/* Column Headers */}
-          <div className="grid grid-cols-[24px_2fr_2fr_1fr_1fr_40px] gap-4 p-3 bg-surface-hover text-muted-foreground font-semibold text-sm border-b border-border">
+          <div className="grid grid-cols-[24px_minmax(0,2fr)_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_40px] gap-4 p-3 bg-surface-hover text-muted-foreground font-semibold text-sm border-b border-border items-center">
             <div className="" />
             <div className="">Name</div>
             <div className="">Description</div>
@@ -460,7 +460,7 @@ export function FileList() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
-              className={`grid grid-cols-[24px_2fr_2fr_1fr_1fr_40px] gap-4 p-3 border-b border-border last:border-b-0 cursor-pointer transition-colors duration-200 ${
+              className={`grid grid-cols-[24px_minmax(0,2fr)_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_40px] items-center gap-4 p-3 border-b border-border last:border-b-0 cursor-pointer transition-colors duration-200 ${
                 selectedRootFolderId === item.id
                   ? "bg-primary/5 text-primary"
                   : "bg-surface hover:bg-surface-hover"
@@ -507,7 +507,7 @@ export function FileList() {
               >
                 {item.description || "---"}
                 {isSearchMode && (
-                  <div className="text-xs text-muted-foreground mt-1">
+                  <div className="text-xs text-muted-foreground mt-1 line-clamp-1">
                     {(() => {
                       const pathSegs = findPathById(
                         item.type === "file" ? (item as any).folderId : item.id
