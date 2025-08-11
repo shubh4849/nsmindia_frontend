@@ -20,6 +20,7 @@ export interface FileItem {
   parentId?: string;
   url?: string;
   publicViewUrl?: string;
+  filePath?: string;
   children?: FileItem[];
   description?: string;
   mimeType?: string;
