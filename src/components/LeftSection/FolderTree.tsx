@@ -87,7 +87,7 @@ export function FolderTree() {
                 style={{
                   left: -12,
                   top: 0,
-                  bottom: "50%",
+                  bottom: 0,
                   borderLeftWidth: 1,
                 }}
               />
@@ -162,8 +162,18 @@ export function FolderTree() {
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.2 }}
-              className="overflow-hidden"
+              className="relative overflow-hidden"
             >
+              {/* Vertical guide spanning entire children block at this level */}
+              <span
+                className="absolute border-dashed border-muted-foreground/40"
+                style={{
+                  left: level * 20 + 8,
+                  top: 0,
+                  bottom: 0,
+                  borderLeftWidth: 1,
+                }}
+              />
               {node.children &&
                 node.children.map((child) => renderNode(child, level + 1))}
             </motion.div>
