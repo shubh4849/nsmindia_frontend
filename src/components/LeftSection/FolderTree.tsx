@@ -15,15 +15,55 @@ interface TreeNode {
 }
 
 export function FolderTree() {
-  const { state, dispatch, fetchFolderChildren } = useFileManager();
-  const { folderTree, expandedFolders } = state;
+  const {
+    state,
+    dispatch,
+    fetchFolderChildren,
+    openPreview,
+    revealFolderInMain,
+    selectMainFolder,
+    setBreadcrumbPath,
+    collapseFolderInMain,
+  } = useFileManager() as any;
+  const { folderTree, expandedFolders, rootFoldersWithCounts } = state as any;
 
   const handleNodeClick = (node: TreeNode) => {
-    if (node.type === "file") return; // no toggle for files
-    dispatch({ type: "TOGGLE_FOLDER_EXPANSION", payload: node.id });
+    if (node.type === "file") {
+      // Build a minimal FileItem shape to preview
+      const file = {
+        id: node.id,
+        name: (node as any).originalName || node.name,
+        type: "file" as const,
+        createdAt: "",
+        modifiedAt: "",
+        path: "",
+        mimeType: (node as any).mimeType,
+      };
+      openPreview(file as any);
+      return;
+    }
     const willExpand = !expandedFolders.has(node.id);
+    const isRootFolder =
+      ((state as any).folderMetaById?.[node.id]?.parentId ?? null) === null;
+    if (willExpand && isRootFolder) {
+      // Collapse all other expanded root folders in the tree and main
+      for (const rf of rootFoldersWithCounts || []) {
+        if (rf.id !== node.id && expandedFolders.has(rf.id)) {
+          dispatch({ type: "TOGGLE_FOLDER_EXPANSION", payload: rf.id });
+          collapseFolderInMain(rf.id);
+        }
+      }
+    }
+    dispatch({ type: "TOGGLE_FOLDER_EXPANSION", payload: node.id });
     if (willExpand && (!node.children || node.children.length === 0)) {
       fetchFolderChildren(node.id);
+    }
+    // Sync middle section
+    selectMainFolder(node.id);
+    if (willExpand) {
+      revealFolderInMain(node.id);
+    } else {
+      collapseFolderInMain(node.id);
     }
   };
 

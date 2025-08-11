@@ -9,6 +9,8 @@ import {
   File,
   Sheet,
   Presentation,
+  FileType2,
+  FileCog,
 } from "lucide-react";
 import { FileItem } from "@/context/FileManagerContext";
 import { getFileIcon } from "@/utils/fileUtils";
@@ -31,6 +33,8 @@ const iconMap = {
   File,
   Sheet,
   Presentation,
+  Pdf: FileType2,
+  Word: FileCog,
 };
 
 export function FileIcon({
@@ -40,7 +44,7 @@ export function FileIcon({
   badgeCount,
 }: FileIconProps) {
   const iconName = getFileIcon(file);
-  const IconComponent = iconMap[iconName as keyof typeof iconMap] || File;
+  const IconComponent = (iconMap as any)[iconName] || File;
 
   const getIconColor = () => {
     if (file.type === "folder") {
@@ -48,6 +52,14 @@ export function FileIcon({
     }
 
     switch (iconName) {
+      case "Pdf":
+        return "text-red-600 dark:text-red-500";
+      case "Word":
+        return "text-blue-600 dark:text-blue-400";
+      case "Sheet":
+        return "text-emerald-600 dark:text-emerald-400";
+      case "Presentation":
+        return "text-amber-600 dark:text-amber-400";
       case "FileText":
         return "text-gray-600 dark:text-gray-400";
       case "Image":
@@ -60,10 +72,6 @@ export function FileIcon({
         return "text-orange-600 dark:text-orange-400";
       case "Code":
         return "text-blue-600 dark:text-blue-400";
-      case "Sheet":
-        return "text-teal-600 dark:text-teal-400";
-      case "Presentation":
-        return "text-rose-600 dark:text-rose-400";
       default:
         return "text-muted-foreground";
     }

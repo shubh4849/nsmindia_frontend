@@ -33,6 +33,10 @@ export function FileList() {
     setBreadcrumbPath,
     clearMainExploration,
     dispatch,
+    openPreview,
+    revealFolderInTree,
+    collapseFolderInTree,
+    collapseFolderInMain,
   } = useFileManager();
   const {
     selectedFile,
@@ -92,23 +96,47 @@ export function FileList() {
       setBreadcrumbPath(segs);
       selectMainFolder(item.id);
     } else {
-      selectFile(item);
+      openPreview(item);
     }
   };
 
   const handleFileDoubleClick = (item: FileItem) => {
-    // Double-clicking an item should also select it.
-    selectFile(item);
+    // Double-clicking an item should open preview for files
+    if (item.type === "file") {
+      openPreview(item);
+    } else {
+      selectFile(item);
+    }
   };
 
   const handleExpandToggle = async (folder: FileItem) => {
-    toggleMainExpand(folder.id);
-    if (!mainChildrenByParent[folder.id]) {
-      await fetchMainChildren(folder.id);
+    const willExpand = !mainExpandedIds.has(folder.id);
+    const isRootFolder =
+      ((state as any).folderMetaById?.[folder.id]?.parentId ?? null) === null;
+    if (willExpand && isRootFolder) {
+      // Collapse all other expanded root folders first (sync both panels)
+      for (const rf of rootFoldersWithCounts) {
+        if (rf.id !== folder.id && mainExpandedIds.has(rf.id)) {
+          collapseFolderInMain(rf.id);
+          collapseFolderInTree(rf.id);
+        }
+      }
     }
-    // Update breadcrumb path by resolving via tree
-    const segs = findPathById(folder.id);
-    setBreadcrumbPath(segs);
+    if (willExpand) {
+      toggleMainExpand(folder.id);
+      if (!mainChildrenByParent[folder.id]) {
+        await fetchMainChildren(folder.id);
+      }
+      // Update breadcrumb path by resolving via tree
+      const segs = findPathById(folder.id);
+      setBreadcrumbPath(segs);
+      // Sync left tree to reveal this folder
+      await revealFolderInTree(folder.id);
+    } else {
+      // Collapsing: sync left tree collapse
+      collapseFolderInMain(folder.id);
+      collapseFolderInTree(folder.id);
+    }
   };
 
   const handleRootToggle = async (folder: FileItem) => {

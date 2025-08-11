@@ -11,6 +11,7 @@ import { FileList } from "@/components/MiddleSection/FileGrid";
 import { Pagination } from "@/components/MiddleSection/Pagination";
 import { CreateFolderModal } from "@/components/Modals/CreateFolderModal";
 import { UploadFileModal } from "@/components/Modals/UploadFileModal";
+import { PreviewDialog } from "@/components/Modals/PreviewDialog";
 
 export function FileManager() {
   const { state, dispatch } = useFileManager();
@@ -112,6 +113,7 @@ export function FileManager() {
         parentFolderId={folderToCreateInId}
         parentFolderCurrentPath={folderToCreateParentPath}
       />
+      <PreviewDialog />
     </div>
   );
 }

@@ -19,6 +19,7 @@ export interface FileItem {
   path: string;
   parentId?: string;
   url?: string;
+  publicViewUrl?: string;
   children?: FileItem[];
   description?: string;
   mimeType?: string;
@@ -69,6 +70,8 @@ interface FileManagerState {
   selectedMainFolderId: string | null;
   isSearchMode: boolean;
   folderMetaById: Record<string, { name: string; parentId: string | null }>;
+  // Preview dialog state
+  isPreviewDialogOpen: boolean;
 }
 
 type FileManagerAction =
@@ -139,6 +142,10 @@ type FileManagerAction =
       type: "SET_FOLDER_CHILDREN";
       payload: { parentId: string; children: FileItem[] };
     }
+  // Preview dialog actions
+  | { type: "OPEN_PREVIEW_DIALOG"; payload: FileItem }
+  | { type: "CLOSE_PREVIEW_DIALOG" }
+  // Main view and optimistic actions
   | { type: "TOGGLE_MAIN_EXPAND"; payload: string }
   | {
       type: "SET_MAIN_CHILDREN";
@@ -199,6 +206,7 @@ const initialState: FileManagerState = {
   selectedMainFolderId: null,
   isSearchMode: false,
   folderMetaById: {},
+  isPreviewDialogOpen: false,
 };
 
 function fileManagerReducer(
@@ -331,6 +339,14 @@ function fileManagerReducer(
         });
       return { ...state, folderTree: updateChildren(state.folderTree) };
     }
+    case "OPEN_PREVIEW_DIALOG":
+      return {
+        ...state,
+        selectedFile: action.payload,
+        isPreviewDialogOpen: true,
+      };
+    case "CLOSE_PREVIEW_DIALOG":
+      return { ...state, isPreviewDialogOpen: false };
     case "TOGGLE_MAIN_EXPAND": {
       const newSet = new Set(state.mainExpandedIds);
       if (newSet.has(action.payload)) newSet.delete(action.payload);
@@ -509,6 +525,7 @@ interface FileManagerContextType {
     deltaFiles?: number
   ) => void;
   revealFolderInMain: (folderId: string) => Promise<void>;
+  revealFolderInTree: (folderId: string) => Promise<void>;
   runUnifiedSearch: (params: {
     q?: string;
     name?: string;
@@ -520,6 +537,12 @@ interface FileManagerContextType {
     limit?: number;
     includeChildCounts?: boolean;
   }) => Promise<void>;
+  // Preview controls
+  openPreview: (file: FileItem) => void;
+  closePreview: () => void;
+  // Deterministic collapse helpers
+  collapseFolderInTree: (folderId: string) => void;
+  collapseFolderInMain: (folderId: string) => void;
 }
 
 const FileManagerContext = createContext<FileManagerContextType | undefined>(
@@ -1237,6 +1260,55 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
     [state.folderTree]
   );
 
+  // Collect all descendant folder IDs under a given folderId from the tree
+  const getDescendantIds = useCallback(
+    (folderId: string): string[] => {
+      const result: string[] = [];
+      const walk = (nodes: FileItem[]): boolean => {
+        for (const n of nodes) {
+          if (n.id === folderId) {
+            const traverse = (kids?: FileItem[]) => {
+              for (const child of kids || []) {
+                result.push(child.id);
+                if (child.children && child.children.length > 0) {
+                  traverse(child.children);
+                }
+              }
+            };
+            traverse(n.children);
+            return true;
+          }
+          if (n.children && n.children.length > 0) {
+            const found = walk(n.children);
+            if (found) return true;
+          }
+        }
+        return false;
+      };
+      walk(state.folderTree || []);
+      return result;
+    },
+    [state.folderTree]
+  );
+
+  // Determine if candidateId is a descendant of ancestorId via parent map
+  const isDescendantOf = useCallback(
+    (candidateId: string, ancestorId: string): boolean => {
+      if (candidateId === ancestorId) return true;
+      let cursor: string | null = candidateId;
+      let guard = 0;
+      while (cursor && guard < 1000) {
+        const meta = (state.folderMetaById as any)[cursor];
+        if (!meta) break;
+        if (meta.parentId === ancestorId) return true;
+        cursor = meta.parentId;
+        guard += 1;
+      }
+      return false;
+    },
+    [state.folderMetaById]
+  );
+
   const revealFolderInMain = useCallback(
     async (folderId: string) => {
       const pathIds = findPathIds(folderId);
@@ -1282,6 +1354,83 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
       state.mainExpandedIds,
       fetchMainChildren,
       findPathIds,
+    ]
+  );
+
+  // Expand the left tree to reveal a folder by id
+  const revealFolderInTree = useCallback(
+    async (folderId: string) => {
+      const ids = findPathIds(folderId);
+      if (!ids || ids.length === 0) return;
+      // Ensure each ancestor has its children loaded in the tree
+      for (const id of ids) {
+        if (!state.expandedFolders.has(id)) {
+          dispatch({ type: "TOGGLE_FOLDER_EXPANSION", payload: id });
+        }
+        try {
+          await fetchFolderChildren(id);
+        } catch {}
+      }
+    },
+    [findPathIds, state.expandedFolders, fetchFolderChildren]
+  );
+
+  // Collapse helpers for sync
+  const collapseFolderInTree = useCallback(
+    (folderId: string) => {
+      // Close all expanded nodes that are descendants of folderId (or itself)
+      const toClose: string[] = [];
+      state.expandedFolders.forEach((id) => {
+        if (isDescendantOf(id, folderId)) toClose.push(id);
+      });
+      for (const id of toClose) {
+        dispatch({ type: "TOGGLE_FOLDER_EXPANSION", payload: id });
+      }
+      // If current selection is the collapsed node or within its subtree, move selection to parent of folderId
+      const selectedId = state.selectedMainFolderId;
+      if (selectedId && isDescendantOf(selectedId, folderId)) {
+        const parentId =
+          (state.folderMetaById as any)[folderId]?.parentId ?? null;
+        dispatch({ type: "SET_SELECTED_MAIN_FOLDER", payload: parentId });
+        const segs = getPathSegmentsFor(parentId);
+        dispatch({ type: "SET_CURRENT_PATH", payload: segs });
+      }
+    },
+    [
+      state.expandedFolders,
+      state.selectedMainFolderId,
+      state.folderMetaById,
+      getPathSegmentsFor,
+      isDescendantOf,
+    ]
+  );
+
+  const collapseFolderInMain = useCallback(
+    (folderId: string) => {
+      // Close all expanded nodes that are descendants of folderId (or itself)
+      const toClose: string[] = [];
+      state.mainExpandedIds.forEach((id) => {
+        if (isDescendantOf(id, folderId)) toClose.push(id);
+      });
+      for (const id of toClose) {
+        dispatch({ type: "TOGGLE_MAIN_EXPAND", payload: id });
+      }
+      // If current selection is the collapsed node or within its subtree, move selection to parent of folderId
+      const selectedId = state.selectedMainFolderId;
+      if (selectedId && isDescendantOf(selectedId, folderId)) {
+        const parentId =
+          (state.folderMetaById as any)[folderId]?.parentId ?? null;
+        dispatch({ type: "SET_SELECTED_MAIN_FOLDER", payload: parentId });
+        const segs = getPathSegmentsFor(parentId);
+        dispatch({ type: "SET_CURRENT_PATH", payload: segs });
+      }
+    },
+    [
+      state.mainExpandedIds,
+      state.selectedMainFolderId,
+      state.folderMetaById,
+      getPathSegmentsFor,
+      isDescendantOf,
     ]
   );
 
@@ -1412,6 +1561,9 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
         clearMainExploration: () => dispatch({ type: "CLEAR_MAIN_EXPANSIONS" }),
         revalidateQuietly: scheduleRevalidate,
         revealFolderInMain,
+        revealFolderInTree,
+        collapseFolderInTree,
+        collapseFolderInMain,
         runUnifiedSearch,
 
         optimisticAddChild: (parentId: string | null, child: FileItem) =>
@@ -1443,6 +1595,10 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
             type: "ADJUST_FOLDER_COUNTS",
             payload: { folderId, deltaFolders, deltaFiles },
           }),
+        // Preview controls
+        openPreview: (file: FileItem) =>
+          dispatch({ type: "OPEN_PREVIEW_DIALOG", payload: file }),
+        closePreview: () => dispatch({ type: "CLOSE_PREVIEW_DIALOG" }),
       }}
     >
       {children}
