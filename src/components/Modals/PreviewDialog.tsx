@@ -26,16 +26,71 @@ export function PreviewDialog() {
 
   const handleDownload = async () => {
     if (!selectedFile) return;
+
+    const deriveExt = (): string => {
+      const fromName =
+        (selectedFile as any).originalName || selectedFile.name || "";
+      const nameExt = getFileExtension(fromName);
+      if (nameExt) return nameExt;
+      const href =
+        (selectedFile as any).filePath || (selectedFile as any).url || "";
+      try {
+        const u = new URL(href as string);
+        const pathname = u.pathname || "";
+        const urlExt = pathname.split(".").pop() || "";
+        if (urlExt && !urlExt.includes("/")) return urlExt.toLowerCase();
+      } catch {}
+      const fmt = ((selectedFile as any).format || "").toLowerCase();
+      if (fmt) return fmt;
+      const mime = (selectedFile.mimeType || "").toLowerCase();
+      const mimeMap: Record<string, string> = {
+        "application/pdf": "pdf",
+        "application/msword": "doc",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+          "docx",
+        "application/vnd.ms-excel": "xls",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+          "xlsx",
+        "application/vnd.ms-powerpoint": "ppt",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+          "pptx",
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/gif": "gif",
+        "image/webp": "webp",
+        "image/bmp": "bmp",
+        "image/tiff": "tiff",
+        "text/plain": "txt",
+        "text/csv": "csv",
+        "application/json": "json",
+        "application/xml": "xml",
+        "video/mp4": "mp4",
+        "video/webm": "webm",
+        "video/ogg": "ogg",
+      };
+      if (mimeMap[mime]) return mimeMap[mime];
+      const fallback = getFileExtension(selectedFile.name);
+      return fallback || "bin";
+    };
+
+    const buildFilename = () => {
+      const base =
+        (selectedFile as any).originalName || selectedFile.name || "download";
+      const hasExt = !!getFileExtension(base);
+      if (hasExt) return base;
+      const ext = deriveExt();
+      return ext ? `${base}.${ext}` : base;
+    };
+
     try {
-      // Prefer the original Cloudinary secure_url for downloading
+      // Prefer the original Cloudinary/R2 URL for downloading
       const href = (selectedFile as any).filePath || (selectedFile as any).url;
+      const filename = buildFilename();
       if (typeof href === "string" && /^https?:\/\//i.test(href)) {
         const a = document.createElement("a");
         a.href = href;
         a.target = "_blank";
-        const preferred =
-          (selectedFile as any).originalName || selectedFile.name || "download";
-        a.download = preferred;
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -49,9 +104,7 @@ export function PreviewDialog() {
       const urlObj = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = urlObj;
-      const preferred =
-        (selectedFile as any).originalName || selectedFile.name || "download";
-      a.download = preferred;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -179,6 +232,7 @@ export function PreviewDialog() {
       extension
     );
     const isOdf = ["odt", "ods", "odp"].includes(extension);
+    const isPdf = selectedFile.mimeType?.includes("pdf") || extension === "pdf";
 
     if (loadingPreview) {
       return (
@@ -204,6 +258,30 @@ export function PreviewDialog() {
             src={embed}
             className="w-full h-full border-0"
           />
+        </div>
+      );
+    }
+
+    // PDF: render directly in iframe for consistent behavior
+    if (isPdf && previewUrl) {
+      return (
+        <div className="h-[70vh] overflow-hidden">
+          <iframe
+            title="pdf-preview"
+            src={previewUrl}
+            className="w-full h-full border-0"
+          />
+          {!hasPublicUrl && (
+            <div className="p-2 text-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(previewUrl, "_blank")}
+              >
+                <ExternalLink size={16} className="mr-1" /> Open PDF
+              </Button>
+            </div>
+          )}
         </div>
       );
     }
