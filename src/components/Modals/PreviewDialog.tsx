@@ -27,25 +27,40 @@ export function PreviewDialog() {
   const handleDownload = async () => {
     if (!selectedFile) return;
     try {
+      // Prefer the original Cloudinary secure_url for downloading
+      const href = (selectedFile as any).filePath || (selectedFile as any).url;
+      if (typeof href === "string" && /^https?:\/\//i.test(href)) {
+        const a = document.createElement("a");
+        a.href = href;
+        a.target = "_blank";
+        const preferred =
+          (selectedFile as any).originalName || selectedFile.name || "download";
+        a.download = preferred;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        return;
+      }
+      // Fallback: stream via API
       const resp = await fileApi.downloadFile(selectedFile.id);
       const blob = new Blob([resp.data], {
         type: resp.headers["content-type"],
       });
-      const url = URL.createObjectURL(blob);
+      const urlObj = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
+      a.href = urlObj;
       const preferred =
         (selectedFile as any).originalName || selectedFile.name || "download";
       a.download = preferred;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(urlObj);
     } catch (e) {
-      // Fallback: try opening the public URL if available
-      const publicUrl = (selectedFile as any).url as string | undefined;
-      if (typeof publicUrl === "string") {
-        window.open(publicUrl, "_blank");
+      // Final fallback: try opening filePath/url in a new tab
+      const href = (selectedFile as any).filePath || (selectedFile as any).url;
+      if (typeof href === "string") {
+        window.open(href, "_blank");
       } else {
         toast({
           title: "Download failed",
