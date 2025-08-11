@@ -24,6 +24,38 @@ export function PreviewDialog() {
     null
   );
 
+  const handleDownload = async () => {
+    if (!selectedFile) return;
+    try {
+      const resp = await fileApi.downloadFile(selectedFile.id);
+      const blob = new Blob([resp.data], {
+        type: resp.headers["content-type"],
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const preferred =
+        (selectedFile as any).originalName || selectedFile.name || "download";
+      a.download = preferred;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      // Fallback: try opening the public URL if available
+      const publicUrl = (selectedFile as any).url as string | undefined;
+      if (typeof publicUrl === "string") {
+        window.open(publicUrl, "_blank");
+      } else {
+        toast({
+          title: "Download failed",
+          description: "Unable to download this file.",
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
   useEffect(() => {
     const fetchPreview = async () => {
       if (!selectedFile || selectedFile.type === "folder") {
@@ -312,6 +344,7 @@ export function PreviewDialog() {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={handleDownload}
                 className="bg-surface hover:bg-surface-hover border-primary text-primary"
               >
                 <Download size={16} className="mr-1" />
