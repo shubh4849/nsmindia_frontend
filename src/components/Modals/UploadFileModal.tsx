@@ -59,6 +59,35 @@ const ACCEPT_MAP: Record<string, string[]> = ACCEPTED_TYPES.reduce(
   {} as Record<string, string[]>
 );
 
+const MAX_IMAGE_DOC_BYTES = 10 * 1024 * 1024; // 10MB
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024; // 100MB
+
+function validateFileSize(file: File) {
+  const type = file.type;
+  const isVideo = VIDEO_TYPES.includes(type);
+  const isImage = IMAGE_TYPES.includes(type);
+  const isDoc = DOCUMENT_TYPES.includes(type);
+  if (isVideo) {
+    if (file.size > MAX_VIDEO_BYTES) {
+      return {
+        code: "file-too-large",
+        message: `Video exceeds 100MB limit (${formatFileSize(file.size)})`,
+      } as any;
+    }
+    return null;
+  }
+  if (isImage || isDoc) {
+    if (file.size > MAX_IMAGE_DOC_BYTES) {
+      return {
+        code: "file-too-large",
+        message: `File exceeds 10MB limit (${formatFileSize(file.size)})`,
+      } as any;
+    }
+    return null;
+  }
+  return null;
+}
+
 export function UploadFileModal({
   isOpen,
   onClose,
@@ -111,8 +140,9 @@ export function UploadFileModal({
       onDrop,
       onDropRejected,
       multiple: true,
-      maxSize: 100 * 1024 * 1024,
+      maxSize: MAX_VIDEO_BYTES,
       accept: ACCEPT_MAP,
+      validator: validateFileSize,
     });
 
   const removeFile = (id: string) => {
@@ -121,6 +151,29 @@ export function UploadFileModal({
 
   const uploadFile = async (pendingFile: PendingFile): Promise<boolean> => {
     const { file, id } = pendingFile;
+
+    // Safety check: enforce size limits before hitting backend
+    const isVideo = VIDEO_TYPES.includes(file.type);
+    const isImage = IMAGE_TYPES.includes(file.type);
+    const isDoc = DOCUMENT_TYPES.includes(file.type);
+    const limit = isVideo ? MAX_VIDEO_BYTES : MAX_IMAGE_DOC_BYTES;
+    if ((isVideo || isImage || isDoc) && file.size > limit) {
+      setPendingFiles((prev) =>
+        prev.map((f) => (f.id === id ? { ...f, status: "error" } : f))
+      );
+      toast({
+        title: "File too large",
+        description: isVideo
+          ? `Videos must be <= 100MB. "${file.name}" is ${formatFileSize(
+              file.size
+            )}.`
+          : `Images/Documents must be <= 10MB. "${
+              file.name
+            }" is ${formatFileSize(file.size)}.`,
+        variant: "destructive",
+      });
+      return false;
+    }
 
     setPendingFiles((prev) =>
       prev.map((f) => (f.id === id ? { ...f, status: "uploading" } : f))
@@ -294,7 +347,7 @@ export function UploadFileModal({
                 : "Drag & drop files here, or click to select"}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              Maximum file size: 100MB
+              Max size: 10MB for images/docs, 100MB for MP4 videos
               {isDragReject && (
                 <span className="ml-2 text-destructive">
                   (Unsupported type)
