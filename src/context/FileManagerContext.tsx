@@ -7,7 +7,7 @@ import React, {
   useRef,
   useCallback,
 } from "react";
-import { fileApi, folderApi, sseApi } from "@/services/api";
+import { fileApi, folderApi, sseApi, statsApi } from "@/services/api";
 
 export interface FileItem {
   id: string;
@@ -781,35 +781,19 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
           const rootContents = await folderApi.getRootContents({
             page: state.currentPage,
             limit: state.itemsPerPage,
+            includeChildCounts: true,
           });
 
-          // Enrich folders with direct child counts (like other views)
           const foldersRaw = rootContents.data.folders || [];
-          const foldersWithCounts: FolderItemWithCounts[] = await Promise.all(
-            foldersRaw.map(async (f: any) => {
-              try {
-                const [cf, cfi] = await Promise.all([
-                  folderApi.getDirectChildFoldersCount(f.id || f._id),
-                  folderApi.getDirectChildFilesCount(f.id || f._id),
-                ]);
-                return {
-                  ...(f as any),
-                  id: f.id || f._id,
-                  type: "folder",
-                  totalChildFolders: cf.data.count ?? 0,
-                  totalChildFiles: cfi.data.count ?? 0,
-                } as FolderItemWithCounts;
-              } catch {
-                return {
-                  ...(f as any),
-                  id: f.id || f._id,
-                  type: "folder",
-                  totalChildFolders: 0,
-                  totalChildFiles: 0,
-                } as FolderItemWithCounts;
-              }
-            })
-          );
+          const foldersWithCounts: FolderItemWithCounts[] = (
+            foldersRaw as any[]
+          ).map((f: any) => ({
+            ...(f as any),
+            id: f.id || f._id,
+            type: "folder",
+            totalChildFolders: f.counts?.childFolders ?? 0,
+            totalChildFiles: f.counts?.childFiles ?? 0,
+          }));
           // Merge meta from root folders
           const meta: Record<
             string,
@@ -836,13 +820,18 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
           );
           const folderContentsResponse = await folderApi.getFolderContents(
             state.currentFolderId,
-            { page: state.currentPage, limit: state.itemsPerPage }
+            {
+              page: state.currentPage,
+              limit: state.itemsPerPage,
+              includeChildCounts: true,
+            }
           );
 
           const mappedFolders: FileItem[] = (
             folderContentsResponse.data.folders || []
           ).map((f: any) => ({
             ...f,
+            id: f.id || f._id,
             type: "folder",
           }));
           // Merge meta from children folders
@@ -1054,20 +1043,15 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
 
   const fetchCounts = useCallback(async () => {
     try {
-      console.log("Attempting to fetch folder count...");
-      const foldersCountResponse = await folderApi.getFoldersCount();
-      console.log("Folder count API response:", foldersCountResponse.data);
-
-      console.log("Attempting to fetch file count...");
-      const filesCountResponse = await fileApi.getFilesCount();
-      console.log("File count API response:", filesCountResponse.data);
-
+      const res = await statsApi.getCounts();
+      const counts = (res.data && (res.data.counts || res.data)) || {};
+      const totalFolders =
+        counts.folders ?? counts.totalFolders ?? counts.folderCount ?? 0;
+      const totalDocuments =
+        counts.files ?? counts.totalFiles ?? counts.fileCount ?? 0;
       dispatch({
         type: "SET_COUNTS",
-        payload: {
-          totalFolders: foldersCountResponse.data.count,
-          totalDocuments: filesCountResponse.data.count,
-        },
+        payload: { totalFolders, totalDocuments },
       });
     } catch (error) {
       console.error("Error fetching counts:", error);
@@ -1127,26 +1111,16 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
       const res = await folderApi.getFolderContents(parentId, {
         page: 1,
         limit: 200,
+        includeChildCounts: true,
       });
       const foldersRaw = res.data.folders || [];
-      // Enrich folders with direct child counts
-      const foldersWithCounts: FileItem[] = await Promise.all(
-        foldersRaw.map(async (f: any) => {
-          try {
-            const [cf, cfi] = await Promise.all([
-              folderApi.getDirectChildFoldersCount(f.id || f._id),
-              folderApi.getDirectChildFilesCount(f.id || f._id),
-            ]);
-            return {
-              ...f,
-              id: f.id || f._id,
-              type: "folder",
-              totalChildFolders: cf.data.count ?? 0,
-              totalChildFiles: cfi.data.count ?? 0,
-            } as FileItem;
-          } catch {
-            return { ...f, id: f.id || f._id, type: "folder" } as FileItem;
-          }
+      const foldersWithCounts: FileItem[] = (foldersRaw as any[]).map(
+        (f: any) => ({
+          ...f,
+          id: f.id || f._id,
+          type: "folder",
+          totalChildFolders: f.counts?.childFolders ?? 0,
+          totalChildFiles: f.counts?.childFiles ?? 0,
         })
       );
       // Merge meta
@@ -1186,20 +1160,20 @@ export function FileManagerProvider({ children }: { children: ReactNode }) {
         limit: state.itemsPerPage,
       });
 
-      const foldersWithCounts: FolderItemWithCounts[] = await Promise.all(
-        rootFoldersResponse.data.results.map(async (folder: FileItem) => {
-          const [childFoldersCountResponse, childFilesCountResponse] =
-            await Promise.all([
-              folderApi.getDirectChildFoldersCount(folder.id),
-              folderApi.getDirectChildFilesCount(folder.id),
-            ]);
-          return {
-            ...folder,
-            totalChildFolders: childFoldersCountResponse.data.count,
-            totalChildFiles: childFilesCountResponse.data.count,
-          };
-        })
-      );
+      const withCounts = await folderApi.getFolders({
+        parentId: null,
+        page: state.currentPage,
+        limit: state.itemsPerPage,
+        includeChildCounts: true,
+      });
+      const foldersWithCounts: FolderItemWithCounts[] = (
+        withCounts.data.results || []
+      ).map((folder: any) => ({
+        ...folder,
+        id: folder.id || folder._id,
+        totalChildFolders: folder.counts?.childFolders ?? 0,
+        totalChildFiles: folder.counts?.childFiles ?? 0,
+      }));
 
       dispatch({
         type: "SET_FILES_AND_TOTAL",

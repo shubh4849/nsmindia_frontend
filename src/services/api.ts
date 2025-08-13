@@ -239,14 +239,18 @@ export const folderApi = {
   },
   getFolderContents: (
     folderId: string,
-    params?: { page?: number; limit?: number }
+    params?: { page?: number; limit?: number; includeChildCounts?: boolean }
   ) => {
     return api.get(`/folders/${folderId}/contents`, { params });
   },
   getFolderBreadcrumb: (folderId: string) => {
     return api.get(`/folders/${folderId}/breadcrumb`);
   },
-  getRootContents: (params?: { page?: number; limit?: number }) => {
+  getRootContents: (params?: {
+    page?: number;
+    limit?: number;
+    includeChildCounts?: boolean;
+  }) => {
     return api.get(`/folders/root/contents`, { params });
   },
   unifiedSearch: (params: {
@@ -270,6 +274,10 @@ export const folderApi = {
   getDirectChildFilesCount: (folderId: string) => {
     return api.get(`/folders/${folderId}/child-files/count`);
   },
+};
+
+export const statsApi = {
+  getCounts: () => api.get(`/stats/counts`),
 };
 
 export const sseApi = {
